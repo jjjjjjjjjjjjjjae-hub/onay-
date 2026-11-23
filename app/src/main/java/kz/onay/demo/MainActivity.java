@@ -142,12 +142,19 @@ public class MainActivity extends Activity {
         boolean trustedOrigin = request.getOrigin() != null
                 && APP_ASSET_HOST.equals(request.getOrigin().getHost());
         String[] resources = request.getResources();
-        boolean videoOnly = resources != null && resources.length == 1
-                && PermissionRequest.RESOURCE_VIDEO_CAPTURE.equals(resources[0]);
+        boolean requestsVideo = false;
+        if (resources != null) {
+            for (String resource : resources) {
+                if (PermissionRequest.RESOURCE_VIDEO_CAPTURE.equals(resource)) {
+                    requestsVideo = true;
+                    break;
+                }
+            }
+        }
 
         // Only this bundled demo page may request the native camera fallback.
-        // Remote pages and microphone requests are always denied.
-        if (!trustedOrigin || !videoOnly) {
+        // If WebView also asks for audio, never grant microphone access.
+        if (!trustedOrigin || !requestsVideo) {
             request.deny();
             return;
         }
@@ -317,16 +324,10 @@ public class MainActivity extends Activity {
         pendingCameraUri = null;
         pendingCameraFile = null;
 
-        // For scanner/photo inputs, open the phone's native camera directly,
-        // even when the HTML input forgot to include the capture attribute.
-        // The ONAY scanner must always use the device camera, never the gallery.
-        if (shouldOpenNativeCamera(params)) {
-            launchNativeCamera();
-            return true;
-        }
-
-        // Non-camera file inputs may still use the system image picker.
-        return launchImagePicker();
+        // This app is a scanner demo: file/photo capture must always open
+        // the device camera. Never send the scanner flow to the gallery.
+        launchNativeCamera();
+        return true;
     }
 
     private boolean shouldOpenNativeCamera(WebChromeClient.FileChooserParams params) {
