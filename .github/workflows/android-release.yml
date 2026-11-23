@@ -1,0 +1,88 @@
+name: ONAY Demo Android Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-release:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.11.1'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Restore release keystore
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ONAY_KEYSTORE_BASE64 }}
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ]; then
+            echo "::error::Missing GitHub Secret ONAY_KEYSTORE_BASE64"
+            exit 1
+          fi
+          echo "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/onay-release.jks"
+          test -s "$RUNNER_TEMP/onay-release.jks"
+
+      - name: Build signed release APK
+        env:
+          STORE_PASSWORD: ${{ secrets.ONAY_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ONAY_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ONAY_KEY_PASSWORD }}
+        run: |
+          if [ -z "$STORE_PASSWORD" ] || [ -z "$KEY_ALIAS" ] || [ -z "$KEY_PASSWORD" ]; then
+            echo "::error::One or more Android signing secrets are missing"
+            exit 1
+          fi
+
+          VERSION_CODE=$((1000 + GITHUB_RUN_NUMBER))
+          VERSION_NAME="1.0.${GITHUB_RUN_NUMBER}"
+
+          gradle --no-daemon :app:assembleRelease \
+            -PsigningStoreFile="$RUNNER_TEMP/onay-release.jks" \
+            -PsigningStorePassword="$STORE_PASSWORD" \
+            -PsigningKeyAlias="$KEY_ALIAS" \
+            -PsigningKeyPassword="$KEY_PASSWORD" \
+            -PappVersionCode="$VERSION_CODE" \
+            -PappVersionName="$VERSION_NAME"
+
+      - name: Verify APK signature
+        env:
+          ANDROID_HOME: ${{ env.ANDROID_HOME }}
+        run: |
+          APK="app/build/outputs/apk/release/app-release.apk"
+          test -s "$APK"
+          APKSIGNER=$(find "$ANDROID_HOME/build-tools" -name apksigner -type f | sort -V | tail -n 1)
+          "$APKSIGNER" verify --verbose "$APK"
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p release
+          cp app/build/outputs/apk/release/app-release.apk release/ONAY-Demo.apk
+          TAG="v1.0.${GITHUB_RUN_NUMBER}"
+          gh release create "$TAG" release/ONAY-Demo.apk \
+            --title "ONAY Demo $TAG" \
+            --notes "Demo application release. Install/update through Android's package installer." \
+            --latest
+
+      - name: Remove temporary signing material
+        if: always()
+        run: rm -f "$RUNNER_TEMP/onay-release.jks"
