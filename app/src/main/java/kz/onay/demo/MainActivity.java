@@ -1,27 +1,35 @@
 package kz.onay.demo;
 
+import android.Manifest;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.app.ProgressDialog;
 import android.content.Intent;
 import android.content.pm.PackageInfo;
+import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.provider.MediaStore;
 import android.provider.Settings;
 import android.view.Gravity;
 import android.view.ViewGroup;
+import android.webkit.PermissionRequest;
+import android.webkit.ValueCallback;
+import android.webkit.WebChromeClient;
+import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
-import android.webkit.WebViewClient;
 import android.widget.FrameLayout;
 import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.core.content.FileProvider;
+import androidx.webkit.WebViewAssetLoader;
+import androidx.webkit.WebViewClientCompat;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -38,8 +46,16 @@ public class MainActivity extends Activity {
     private static final String RELEASE_API =
             "https://api.github.com/repos/jjjjjjjjjjjjjjae-hub/onay-/releases/latest";
     private static final String APK_ASSET_NAME = "ONAY-Demo.apk";
+    private static final int CAMERA_PERMISSION_REQUEST = 702;
+    private static final int FILE_CHOOSER_REQUEST = 703;
+    private static final String APP_ASSET_HOST = "appassets.androidplatform.net";
 
     private WebView web;
+    private WebViewAssetLoader assetLoader;
+    private PermissionRequest pendingWebPermissionRequest;
+    private ValueCallback<Uri[]> pendingFileChooserCallback;
+    private Uri pendingCameraUri;
+    private File pendingCameraFile;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private File updateApkFile;
     private boolean waitingForInstallPermission = false;
@@ -55,12 +71,38 @@ public class MainActivity extends Activity {
         WebSettings settings = web.getSettings();
         settings.setJavaScriptEnabled(true);
         settings.setDomStorageEnabled(true);
-        settings.setAllowFileAccess(true);
-        settings.setAllowFileAccessFromFileURLs(false);
-        settings.setAllowUniversalAccessFromFileURLs(false);
+        settings.setAllowFileAccess(false);
+        settings.setAllowContentAccess(true);
+        settings.setMediaPlaybackRequiresUserGesture(false);
 
-        web.setWebViewClient(new WebViewClient());
-        web.loadUrl("file:///android_asset/index.html");
+        // Load the bundled page from a secure local HTTPS origin so getUserMedia works.
+        assetLoader = new WebViewAssetLoader.Builder()
+                .addPathHandler("/assets/", new WebViewAssetLoader.AssetsPathHandler(this))
+                .build();
+
+        web.setWebViewClient(new WebViewClientCompat() {
+            @Override
+            public android.webkit.WebResourceResponse shouldInterceptRequest(
+                    WebView view, WebResourceRequest request) {
+                return assetLoader.shouldInterceptRequest(request.getUrl());
+            }
+        });
+
+        web.setWebChromeClient(new WebChromeClient() {
+            @Override
+            public void onPermissionRequest(PermissionRequest request) {
+                runOnUiThread(() -> handleWebCameraPermission(request));
+            }
+
+            @Override
+            public boolean onShowFileChooser(WebView view,
+                    ValueCallback<Uri[]> filePathCallback,
+                    FileChooserParams fileChooserParams) {
+                return handleWebFileChooser(filePathCallback, fileChooserParams);
+            }
+        });
+
+        web.loadUrl("https://" + APP_ASSET_HOST + "/assets/index.html");
         root.addView(web, new FrameLayout.LayoutParams(-1, -1));
 
         TextView demo = new TextView(this);
@@ -76,6 +118,131 @@ public class MainActivity extends Activity {
 
         setContentView(root);
         checkForUpdates();
+    }
+
+    private void handleWebCameraPermission(PermissionRequest request) {
+        if (request == null) return;
+
+        boolean trustedOrigin = request.getOrigin() != null
+                && APP_ASSET_HOST.equals(request.getOrigin().getHost());
+        String[] resources = request.getResources();
+        boolean videoOnly = resources != null && resources.length == 1
+                && PermissionRequest.RESOURCE_VIDEO_CAPTURE.equals(resources[0]);
+
+        // Do not grant WebView permissions to remote pages or microphone requests.
+        if (!trustedOrigin || !videoOnly) {
+            request.deny();
+            return;
+        }
+
+        if (checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
+            request.grant(new String[]{PermissionRequest.RESOURCE_VIDEO_CAPTURE});
+            return;
+        }
+
+        if (pendingWebPermissionRequest != null) {
+            pendingWebPermissionRequest.deny();
+        }
+        pendingWebPermissionRequest = request;
+        requestPermissions(new String[]{Manifest.permission.CAMERA}, CAMERA_PERMISSION_REQUEST);
+    }
+
+    private boolean handleWebFileChooser(ValueCallback<Uri[]> callback,
+            WebChromeClient.FileChooserParams params) {
+        if (pendingFileChooserCallback != null) {
+            pendingFileChooserCallback.onReceiveValue(null);
+        }
+        pendingFileChooserCallback = callback;
+        pendingCameraUri = null;
+        pendingCameraFile = null;
+
+        if (params != null && params.isCaptureEnabled()) {
+            try {
+                Intent cameraIntent = new Intent(MediaStore.ACTION_IMAGE_CAPTURE);
+                if (cameraIntent.resolveActivity(getPackageManager()) == null) {
+                    finishFileChooser(null);
+                    Toast.makeText(this, "Камера қолданбасы табылмады.", Toast.LENGTH_LONG).show();
+                    return true;
+                }
+
+                pendingCameraFile = File.createTempFile("onay-camera-", ".jpg", getCacheDir());
+                pendingCameraUri = FileProvider.getUriForFile(
+                        this, getPackageName() + ".fileprovider", pendingCameraFile);
+                cameraIntent.putExtra(MediaStore.EXTRA_OUTPUT, pendingCameraUri);
+                cameraIntent.putExtra("android.intent.extras.CAMERA_FACING", 1);
+                cameraIntent.putExtra("android.intent.extras.LENS_FACING_FRONT", 1);
+                cameraIntent.putExtra("android.intent.extra.USE_FRONT_CAMERA", true);
+                cameraIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION
+                        | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+                cameraIntent.setClipData(android.content.ClipData.newRawUri("camera-photo", pendingCameraUri));
+                startActivityForResult(cameraIntent, FILE_CHOOSER_REQUEST);
+                return true;
+            } catch (Exception error) {
+                finishFileChooser(null);
+                Toast.makeText(this, "Камераны ашу мүмкін болмады: " + error.getMessage(),
+                        Toast.LENGTH_LONG).show();
+                return true;
+            }
+        }
+
+        try {
+            Intent pickerIntent = params != null
+                    ? params.createIntent()
+                    : new Intent(Intent.ACTION_GET_CONTENT).setType("image/*");
+            startActivityForResult(pickerIntent, FILE_CHOOSER_REQUEST);
+            return true;
+        } catch (Exception error) {
+            finishFileChooser(null);
+            Toast.makeText(this, "Файл таңдау терезесін ашу мүмкін болмады.",
+                    Toast.LENGTH_LONG).show();
+            return true;
+        }
+    }
+
+    private void finishFileChooser(Uri[] results) {
+        if (pendingFileChooserCallback != null) {
+            pendingFileChooserCallback.onReceiveValue(results);
+            pendingFileChooserCallback = null;
+        }
+        pendingCameraUri = null;
+        pendingCameraFile = null;
+    }
+
+    @Override
+    public void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode != FILE_CHOOSER_REQUEST) return;
+
+        Uri[] results = null;
+        if (resultCode == RESULT_OK) {
+            if (pendingCameraUri != null && pendingCameraFile != null
+                    && pendingCameraFile.exists() && pendingCameraFile.length() > 0) {
+                results = new Uri[]{pendingCameraUri};
+            } else if (data != null && data.getData() != null) {
+                results = new Uri[]{data.getData()};
+            }
+        }
+        finishFileChooser(results);
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode != CAMERA_PERMISSION_REQUEST) return;
+
+        PermissionRequest request = pendingWebPermissionRequest;
+        pendingWebPermissionRequest = null;
+        if (request == null) return;
+
+        boolean granted = grantResults.length > 0
+                && grantResults[0] == PackageManager.PERMISSION_GRANTED
+                && checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED;
+        if (granted && request.getOrigin() != null
+                && APP_ASSET_HOST.equals(request.getOrigin().getHost())) {
+            request.grant(new String[]{PermissionRequest.RESOURCE_VIDEO_CAPTURE});
+        } else {
+            request.deny();
+        }
     }
 
     private void checkForUpdates() {
@@ -305,6 +472,14 @@ public class MainActivity extends Activity {
     @Override
     protected void onDestroy() {
         closeDownloadDialog();
+        if (pendingWebPermissionRequest != null) {
+            pendingWebPermissionRequest.deny();
+            pendingWebPermissionRequest = null;
+        }
+        if (pendingFileChooserCallback != null) {
+            pendingFileChooserCallback.onReceiveValue(null);
+            pendingFileChooserCallback = null;
+        }
         if (web != null) {
             web.destroy();
             web = null;
