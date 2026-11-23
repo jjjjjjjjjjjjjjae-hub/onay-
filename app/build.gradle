@@ -1,12 +1,38 @@
 plugins { id 'com.android.application' }
+
+def appVersionCodeValue = (project.findProperty('appVersionCode') ?: '1').toString().toInteger()
+def appVersionNameValue = (project.findProperty('appVersionName') ?: '1.0-demo').toString()
+def signingStorePath = (project.findProperty('signingStoreFile') ?: "${rootProject.projectDir}/missing-release-key.jks").toString()
+
 android {
     namespace 'kz.onay.demo'
     compileSdk 35
+
     defaultConfig {
         applicationId 'kz.onay.demo'
         minSdk 23
         targetSdk 35
-        versionCode 1
-        versionName '1.0-demo'
+        versionCode appVersionCodeValue
+        versionName appVersionNameValue
     }
+
+    signingConfigs {
+        release {
+            storeFile file(signingStorePath)
+            storePassword project.findProperty('signingStorePassword') ?: ''
+            keyAlias project.findProperty('signingKeyAlias') ?: ''
+            keyPassword project.findProperty('signingKeyPassword') ?: ''
+        }
+    }
+
+    buildTypes {
+        release {
+            signingConfig signingConfigs.release
+            minifyEnabled false
+        }
+    }
+}
+
+dependencies {
+    implementation 'androidx.core:core:1.15.0'
 }
