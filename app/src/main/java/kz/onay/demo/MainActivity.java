@@ -219,13 +219,9 @@ public class MainActivity extends Activity {
 
     private void launchNativeQrCamera() {
         if (nativeQrCameraInProgress || isFinishing() || isDestroyed()) return;
-        Intent cameraIntent = new Intent(MediaStore.ACTION_IMAGE_CAPTURE);
-        if (cameraIntent.resolveActivity(getPackageManager()) == null) {
-            notifyNativeCameraError("Телефонда жергілікті камера қолданбасы табылмады.");
-            return;
-        }
 
         try {
+            Intent cameraIntent = new Intent(MediaStore.ACTION_IMAGE_CAPTURE);
             nativeQrCameraFile = File.createTempFile("onay-native-scan-", ".jpg", getCacheDir());
             nativeQrCameraUri = FileProvider.getUriForFile(
                     this, getPackageName() + ".fileprovider", nativeQrCameraFile);
@@ -234,12 +230,17 @@ public class MainActivity extends Activity {
                     | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
             cameraIntent.setClipData(
                     android.content.ClipData.newRawUri("onay-native-scan", nativeQrCameraUri));
+
+            // Start the system camera directly. Do not pre-check with
+            // resolveActivity(): package visibility can hide camera apps on Android 11+.
             nativeQrCameraInProgress = true;
             startActivityForResult(cameraIntent, NATIVE_QR_CAMERA_REQUEST);
-        } catch (Exception error) {
-            nativeQrCameraInProgress = false;
+        } catch (android.content.ActivityNotFoundException error) {
             deleteNativeQrCameraFile();
-            notifyNativeCameraError("Жергілікті камераны ашу мүмкін болмады.");
+            notifyNativeCameraError("Телефонда жергілікті камера қолданбасы жоқ немесе қолжетімсіз.");
+        } catch (Exception error) {
+            deleteNativeQrCameraFile();
+            notifyNativeCameraError("Жергілікті камераны тікелей ашу мүмкін болмады.");
         }
     }
 
@@ -318,13 +319,13 @@ public class MainActivity extends Activity {
 
         // For scanner/photo inputs, open the phone's native camera directly,
         // even when the HTML input forgot to include the capture attribute.
+        // The ONAY scanner must always use the device camera, never the gallery.
         if (shouldOpenNativeCamera(params)) {
-            if (launchNativeCamera()) {
-                return true;
-            }
-            return launchImagePicker();
+            launchNativeCamera();
+            return true;
         }
 
+        // Non-camera file inputs may still use the system image picker.
         return launchImagePicker();
     }
 
@@ -347,14 +348,8 @@ public class MainActivity extends Activity {
         return false;
     }
 
-    private boolean launchNativeCamera() {
+    private void launchNativeCamera() {
         Intent cameraIntent = new Intent(MediaStore.ACTION_IMAGE_CAPTURE);
-        if (cameraIntent.resolveActivity(getPackageManager()) == null) {
-            Toast.makeText(this, "Телефоннан камера қолданбасы табылмады. Галерея ашылады.",
-                    Toast.LENGTH_LONG).show();
-            return false;
-        }
-
         try {
             pendingCameraFile = File.createTempFile("onay-camera-", ".jpg", getCacheDir());
             pendingCameraUri = FileProvider.getUriForFile(
@@ -366,13 +361,18 @@ public class MainActivity extends Activity {
             cameraIntent.setClipData(
                     android.content.ClipData.newRawUri("onay-camera-photo", pendingCameraUri));
 
+            // Do not route scanner image capture to ACTION_GET_CONTENT / gallery.
             startActivityForResult(cameraIntent, FILE_CHOOSER_REQUEST);
-            return true;
+        } catch (android.content.ActivityNotFoundException error) {
+            deletePendingCameraFile();
+            finishFileChooser(null);
+            Toast.makeText(this, "Телефонда жергілікті камера қолданбасы жоқ немесе қолжетімсіз.",
+                    Toast.LENGTH_LONG).show();
         } catch (Exception error) {
             deletePendingCameraFile();
-            Toast.makeText(this, "Жергілікті камераны ашу мүмкін болмады. Галерея ашылады.",
+            finishFileChooser(null);
+            Toast.makeText(this, "Жергілікті камераны тікелей ашу мүмкін болмады.",
                     Toast.LENGTH_LONG).show();
-            return false;
         }
     }
 
