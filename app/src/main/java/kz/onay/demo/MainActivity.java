@@ -7,7 +7,10 @@ import android.app.ProgressDialog;
 import android.content.Intent;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
+import android.graphics.Bitmap;
+import android.graphics.BitmapFactory;
 import android.graphics.Color;
+import android.util.Base64;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -34,6 +37,7 @@ import androidx.webkit.WebViewClientCompat;
 import org.json.JSONArray;
 import org.json.JSONObject;
 
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.InputStream;
@@ -48,6 +52,7 @@ public class MainActivity extends Activity {
     private static final String APK_ASSET_NAME = "ONAY-Demo.apk";
     private static final int CAMERA_PERMISSION_REQUEST = 702;
     private static final int FILE_CHOOSER_REQUEST = 703;
+    private static final int NATIVE_QR_CAMERA_REQUEST = 704;
     private static final String APP_ASSET_HOST = "appassets.androidplatform.net";
 
     private WebView web;
@@ -58,6 +63,9 @@ public class MainActivity extends Activity {
     private File pendingCameraFile;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private File updateApkFile;
+    private File nativeQrCameraFile;
+    private Uri nativeQrCameraUri;
+    private boolean nativeQrCameraInProgress = false;
     private boolean waitingForInstallPermission = false;
     private ProgressDialog downloadDialog;
 
@@ -85,6 +93,14 @@ public class MainActivity extends Activity {
             public android.webkit.WebResourceResponse shouldInterceptRequest(
                     WebView view, WebResourceRequest request) {
                 return assetLoader.shouldInterceptRequest(request.getUrl());
+            }
+
+            @Override
+            public void onPageFinished(WebView view, String url) {
+                super.onPageFinished(view, url);
+                if (url != null && url.startsWith("https://" + APP_ASSET_HOST + "/assets/")) {
+                    installNativeCameraCallbacks(view);
+                }
             }
         });
 
@@ -129,22 +145,165 @@ public class MainActivity extends Activity {
         boolean videoOnly = resources != null && resources.length == 1
                 && PermissionRequest.RESOURCE_VIDEO_CAPTURE.equals(resources[0]);
 
-        // Do not grant WebView permissions to remote pages or microphone requests.
+        // Only this bundled demo page may request the native camera fallback.
+        // Remote pages and microphone requests are always denied.
         if (!trustedOrigin || !videoOnly) {
             request.deny();
             return;
         }
 
-        if (checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
-            request.grant(new String[]{PermissionRequest.RESOURCE_VIDEO_CAPTURE});
+        // The Android camera app handles the camera permission itself. We return
+        // a captured photo to the bundled page, avoiding WebView getUserMedia
+        // permission differences across Android/WebView versions.
+        request.deny();
+        launchNativeQrCamera();
+    }
+
+    private void installNativeCameraCallbacks(WebView view) {
+        String script =
+                "(function(){"
+                + "if(window.__onayNativeCameraCallbacksInstalled)return;"
+                + "window.__onayNativeCameraCallbacksInstalled=true;"
+                + "window.onayNativeCameraError=function(message){"
+                + "try{if(typeof cameraTabIsOpen==='function'&&cameraTabIsOpen())"
+                + "qrCameraMessage(message||'Камера ашылмады. Қайталап көріңіз.');"
+                + "else if(typeof familyScannerIsOpen==='function'&&familyScannerIsOpen())"
+                + "familyCameraStatus(message||'Камера ашылмады. Қайталап көріңіз.');"
+                + "}catch(e){console.warn(e);}};"
+                + "window.onayNativeCameraPhoto=async function(dataUrl){"
+                + "try{"
+                + "const image=new Image();"
+                + "image.onload=async function(){"
+                + "try{"
+                + "if(typeof familyScannerIsOpen==='function'&&familyScannerIsOpen()){"
+                + "let detector=typeof prepareFamilyBarcodeDetector==='function'?"
+                + "await prepareFamilyBarcodeDetector():null;"
+                + "if(detector){"
+                + "const codes=await detector.detect(image);"
+                + "if(codes&&codes.length){"
+                + "const code=codes[0];"
+                + "const result=document.getElementById('family-scan-result');"
+                + "if(result){result.hidden=false;result.textContent='Штрих-код оқылды: '+"
+                + "(code.rawValue||'Код анықталды')+' ('+(code.format||'barcode')+')';}"
+                + "if(typeof familyCameraStatus==='function')familyCameraStatus('Штрих-код сәтті оқылды.',false);"
+                + "}else if(typeof familyCameraStatus==='function'){"
+                + "familyCameraStatus('Штрих-код анықталмады. Камерамен жақынырақ түсіріп, қайта көріңіз.');}"
+                + "return;}"
+                + "}"
+                + "const maxSide=1280,scale=Math.min(1,maxSide/Math.max(image.naturalWidth,image.naturalHeight));"
+                + "const canvas=document.createElement('canvas');"
+                + "canvas.width=Math.max(1,Math.round(image.naturalWidth*scale));"
+                + "canvas.height=Math.max(1,Math.round(image.naturalHeight*scale));"
+                + "const context=canvas.getContext('2d',{willReadFrequently:true});"
+                + "context.drawImage(image,0,0,canvas.width,canvas.height);"
+                + "const pixels=context.getImageData(0,0,canvas.width,canvas.height);"
+                + "const decoded=window.jsQR?window.jsQR(pixels.data,canvas.width,canvas.height,{inversionAttempts:'attemptBoth'}):null;"
+                + "if(typeof cameraTabIsOpen==='function'&&cameraTabIsOpen()){"
+                + "if(decoded&&typeof parseOnayTransportCode==='function'){"
+                + "const parsed=parseOnayTransportCode(decoded.data);"
+                + "if(parsed&&typeof showTransportQrResult==='function'){showTransportQrResult(parsed,'scan');return;}}"
+                + "if(typeof qrCameraMessage==='function')qrCameraMessage(decoded?'Бұл ONAY көлік QR-коды емес. Қайта түсіріңіз.':'QR-код табылмады. Телефон камерасымен кодты анық түсіріңіз.');"
+                + "return;}"
+                + "if(typeof familyScannerIsOpen==='function'&&familyScannerIsOpen()&&typeof familyCameraStatus==='function'){"
+                + "familyCameraStatus(decoded?'QR-код табылды, бірақ штрих-код форматы сәйкес емес.':'Штрих-код табылмады. Қайта түсіріңіз.');return;}"
+                + "}catch(error){console.warn('Native camera image decode:',error);"
+                + "if(typeof cameraTabIsOpen==='function'&&cameraTabIsOpen())qrCameraMessage('Фотоны оқу мүмкін болмады. Қайта түсіріңіз.');"
+                + "else if(typeof familyScannerIsOpen==='function'&&familyScannerIsOpen())familyCameraStatus('Фотоны оқу мүмкін болмады. Қайта түсіріңіз.');}"
+                + "};"
+                + "image.onerror=function(){window.onayNativeCameraError('Камера фотосын ашу мүмкін болмады.');};"
+                + "image.src=dataUrl;"
+                + "};"
+                + "})();";
+        view.evaluateJavascript(script, null);
+    }
+
+    private void launchNativeQrCamera() {
+        if (nativeQrCameraInProgress || isFinishing() || isDestroyed()) return;
+        Intent cameraIntent = new Intent(MediaStore.ACTION_IMAGE_CAPTURE);
+        if (cameraIntent.resolveActivity(getPackageManager()) == null) {
+            notifyNativeCameraError("Телефонда жергілікті камера қолданбасы табылмады.");
             return;
         }
 
-        if (pendingWebPermissionRequest != null) {
-            pendingWebPermissionRequest.deny();
+        try {
+            nativeQrCameraFile = File.createTempFile("onay-native-scan-", ".jpg", getCacheDir());
+            nativeQrCameraUri = FileProvider.getUriForFile(
+                    this, getPackageName() + ".fileprovider", nativeQrCameraFile);
+            cameraIntent.putExtra(MediaStore.EXTRA_OUTPUT, nativeQrCameraUri);
+            cameraIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION
+                    | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+            cameraIntent.setClipData(
+                    android.content.ClipData.newRawUri("onay-native-scan", nativeQrCameraUri));
+            nativeQrCameraInProgress = true;
+            startActivityForResult(cameraIntent, NATIVE_QR_CAMERA_REQUEST);
+        } catch (Exception error) {
+            nativeQrCameraInProgress = false;
+            deleteNativeQrCameraFile();
+            notifyNativeCameraError("Жергілікті камераны ашу мүмкін болмады.");
         }
-        pendingWebPermissionRequest = request;
-        requestPermissions(new String[]{Manifest.permission.CAMERA}, CAMERA_PERMISSION_REQUEST);
+    }
+
+    private void notifyNativeCameraError(String message) {
+        if (web == null || isFinishing() || isDestroyed()) return;
+        String quoted = JSONObject.quote(message);
+        web.evaluateJavascript(
+                "if(window.onayNativeCameraError)window.onayNativeCameraError(" + quoted + ");",
+                null);
+    }
+
+    private String cameraFileAsDataUrl(File file) throws Exception {
+        BitmapFactory.Options bounds = new BitmapFactory.Options();
+        bounds.inJustDecodeBounds = true;
+        BitmapFactory.decodeFile(file.getAbsolutePath(), bounds);
+        if (bounds.outWidth <= 0 || bounds.outHeight <= 0) {
+            throw new IllegalStateException("Камера фотосының өлшемі оқылмады.");
+        }
+
+        int sample = 1;
+        while (Math.max(bounds.outWidth / sample, bounds.outHeight / sample) > 1280) {
+            sample *= 2;
+        }
+        BitmapFactory.Options options = new BitmapFactory.Options();
+        options.inSampleSize = sample;
+        Bitmap bitmap = BitmapFactory.decodeFile(file.getAbsolutePath(), options);
+        if (bitmap == null) throw new IllegalStateException("Камера фотосын декодтау мүмкін болмады.");
+
+        try (ByteArrayOutputStream output = new ByteArrayOutputStream()) {
+            bitmap.compress(Bitmap.CompressFormat.JPEG, 84, output);
+            return "data:image/jpeg;base64,"
+                    + Base64.encodeToString(output.toByteArray(), Base64.NO_WRAP);
+        } finally {
+            bitmap.recycle();
+        }
+    }
+
+    private void deliverNativeCameraPhoto() {
+        if (web == null || nativeQrCameraFile == null || !nativeQrCameraFile.exists()
+                || nativeQrCameraFile.length() == 0) {
+            notifyNativeCameraError("Камерадан фото алынбады. Қайталап көріңіз.");
+            return;
+        }
+        try {
+            String dataUrl = cameraFileAsDataUrl(nativeQrCameraFile);
+            web.evaluateJavascript(
+                    "if(window.onayNativeCameraPhoto)window.onayNativeCameraPhoto("
+                            + JSONObject.quote(dataUrl) + ");",
+                    null);
+        } catch (Exception error) {
+            notifyNativeCameraError("Камера фотосын өңдеу мүмкін болмады.");
+        } finally {
+            deleteNativeQrCameraFile();
+        }
+    }
+
+    private void deleteNativeQrCameraFile() {
+        if (nativeQrCameraFile != null && nativeQrCameraFile.exists()) {
+            //noinspection ResultOfMethodCallIgnored
+            nativeQrCameraFile.delete();
+        }
+        nativeQrCameraFile = null;
+        nativeQrCameraUri = null;
+        nativeQrCameraInProgress = false;
     }
 
     private boolean handleWebFileChooser(ValueCallback<Uri[]> callback,
@@ -258,6 +417,19 @@ public class MainActivity extends Activity {
     @Override
     public void onActivityResult(int requestCode, int resultCode, Intent data) {
         super.onActivityResult(requestCode, resultCode, data);
+
+        if (requestCode == NATIVE_QR_CAMERA_REQUEST) {
+            nativeQrCameraInProgress = false;
+            if (resultCode == RESULT_OK && nativeQrCameraFile != null
+                    && nativeQrCameraFile.exists() && nativeQrCameraFile.length() > 0) {
+                deliverNativeCameraPhoto();
+            } else {
+                deleteNativeQrCameraFile();
+                notifyNativeCameraError("Фото түсіру тоқтатылды. Сканерлеуді қайта бастауға болады.");
+            }
+            return;
+        }
+
         if (requestCode != FILE_CHOOSER_REQUEST) return;
 
         Uri[] results = null;
@@ -523,6 +695,7 @@ public class MainActivity extends Activity {
             pendingWebPermissionRequest.deny();
             pendingWebPermissionRequest = null;
         }
+        deleteNativeQrCameraFile();
         if (pendingFileChooserCallback != null) {
             pendingFileChooserCallback.onReceiveValue(null);
             pendingFileChooserCallback = null;
