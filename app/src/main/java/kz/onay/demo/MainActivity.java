@@ -75,6 +75,15 @@ public class MainActivity extends Activity {
         settings.setAllowFileAccess(false);
         settings.setAllowContentAccess(true);
         settings.setMediaPlaybackRequiresUserGesture(false);
+        settings.setLoadsImagesAutomatically(true);
+        settings.setBlockNetworkImage(false);
+        settings.setCacheMode(WebSettings.LOAD_DEFAULT);
+
+        // Keep the live camera preview on the accelerated WebView surface.
+        web.setLayerType(android.view.View.LAYER_TYPE_HARDWARE, null);
+        web.setOverScrollMode(android.view.View.OVER_SCROLL_NEVER);
+        web.setFocusable(true);
+        web.setFocusableInTouchMode(true);
 
         // Load the bundled page from a secure local HTTPS origin so getUserMedia works.
         assetLoader = new WebViewAssetLoader.Builder()
@@ -88,6 +97,13 @@ public class MainActivity extends Activity {
                 return assetLoader.shouldInterceptRequest(request.getUrl());
             }
 
+            @Override
+            public void onPageFinished(WebView view, String url) {
+                super.onPageFinished(view, url);
+                if (url != null && url.startsWith("https://" + APP_ASSET_HOST + "/assets/")) {
+                    installFastCameraDefaults(view);
+                }
+            }
         });
 
         web.setWebChromeClient(new WebChromeClient() {
@@ -121,6 +137,45 @@ public class MainActivity extends Activity {
         setContentView(root);
         requestCameraPermissionOnEntry();
         checkForUpdates();
+    }
+
+    private void installFastCameraDefaults(WebView view) {
+        // Tune the page's own live getUserMedia stream; do not open another
+        // camera activity. Preserve explicit constraints already set by HTML.
+        String script =
+                "(function(){"
+                + "const media=navigator.mediaDevices;"
+                + "if(!media||!media.getUserMedia||media.__onayFastCamera)return;"
+                + "const original=media.getUserMedia.bind(media);"
+                + "media.getUserMedia=function(constraints){"
+                + "if(!constraints||!constraints.video)return original(constraints);"
+                + "const video=constraints.video===true?{}:{...constraints.video};"
+                + "if(!video.deviceId&&!video.facingMode)video.facingMode={ideal:'environment'};"
+                + "if(!video.width)video.width={ideal:960};"
+                + "if(!video.height)video.height={ideal:540};"
+                + "if(!video.frameRate)video.frameRate={ideal:30,max:30};"
+                + "return original({...constraints,video:video});"
+                + "};"
+                + "const prepare=function(v){"
+                + "if(!(v instanceof HTMLVideoElement))return;"
+                + "v.setAttribute('playsinline','');"
+                + "v.setAttribute('webkit-playsinline','');"
+                + "v.autoplay=true;v.muted=true;"
+                + "};"
+                + "document.querySelectorAll('video').forEach(prepare);"
+                + "if(document.documentElement){"
+                + "new MutationObserver(function(records){"
+                + "records.forEach(function(record){"
+                + "record.addedNodes.forEach(function(node){"
+                + "prepare(node);"
+                + "if(node.querySelectorAll)node.querySelectorAll('video').forEach(prepare);"
+                + "});"
+                + "});"
+                + "}).observe(document.documentElement,{childList:true,subtree:true});"
+                + "}"
+                + "media.__onayFastCamera=true;"
+                + "})();";
+        view.evaluateJavascript(script, null);
     }
 
     private void requestCameraPermissionOnEntry() {
