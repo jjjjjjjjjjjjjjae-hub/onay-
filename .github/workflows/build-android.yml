@@ -11,7 +11,7 @@ on:
       - 'build.gradle'
       - 'settings.gradle'
       - 'gradle.properties'
-      - '.github/workflows/build-android.yml'
+      - '.github/workflows/**'
 
 permissions:
   contents: write
