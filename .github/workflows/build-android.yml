@@ -4,7 +4,7 @@ on:
   push:
     branches: [main]
     paths:
-      - 'index.html'
+      - 'ONAY_ticket_valid_blue_expired_grayscale.html'
       - 'image.png'
       - 'app/**'
       - 'build.gradle'
@@ -29,10 +29,10 @@ jobs:
         run: |
           echo "ANDROID_HOME=$ANDROID_HOME"
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-35" "build-tools;35.0.0" || sdkmanager "platforms;android-35" "build-tools;35.0.0"
-      - name: Prepare app assets and repository logo
+      - name: Prepare app assets and launcher icon
         run: |
           mkdir -p app/src/main/assets app/src/main/res/drawable-nodpi
-          cp index.html app/src/main/assets/index.html
+          cp ONAY_ticket_valid_blue_expired_grayscale.html app/src/main/assets/index.html
           cp image.png app/src/main/res/drawable-nodpi/ic_launcher.png
       - name: Build debug APK
         run: gradle --no-daemon :app:assembleDebug
