@@ -152,51 +152,93 @@ public class MainActivity extends Activity {
         if (pendingFileChooserCallback != null) {
             pendingFileChooserCallback.onReceiveValue(null);
         }
+
         pendingFileChooserCallback = callback;
         pendingCameraUri = null;
         pendingCameraFile = null;
 
-        if (params != null && params.isCaptureEnabled()) {
-            try {
-                Intent cameraIntent = new Intent(MediaStore.ACTION_IMAGE_CAPTURE);
-                if (cameraIntent.resolveActivity(getPackageManager()) == null) {
-                    finishFileChooser(null);
-                    Toast.makeText(this, "Камера қолданбасы табылмады.", Toast.LENGTH_LONG).show();
-                    return true;
-                }
-
-                pendingCameraFile = File.createTempFile("onay-camera-", ".jpg", getCacheDir());
-                pendingCameraUri = FileProvider.getUriForFile(
-                        this, getPackageName() + ".fileprovider", pendingCameraFile);
-                cameraIntent.putExtra(MediaStore.EXTRA_OUTPUT, pendingCameraUri);
-                cameraIntent.putExtra("android.intent.extras.CAMERA_FACING", 1);
-                cameraIntent.putExtra("android.intent.extras.LENS_FACING_FRONT", 1);
-                cameraIntent.putExtra("android.intent.extra.USE_FRONT_CAMERA", true);
-                cameraIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION
-                        | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
-                cameraIntent.setClipData(android.content.ClipData.newRawUri("camera-photo", pendingCameraUri));
-                startActivityForResult(cameraIntent, FILE_CHOOSER_REQUEST);
+        // For scanner/photo inputs, open the phone's native camera directly,
+        // even when the HTML input forgot to include the capture attribute.
+        if (shouldOpenNativeCamera(params)) {
+            if (launchNativeCamera()) {
                 return true;
-            } catch (Exception error) {
-                finishFileChooser(null);
-                Toast.makeText(this, "Камераны ашу мүмкін болмады: " + error.getMessage(),
-                        Toast.LENGTH_LONG).show();
+            }
+            return launchImagePicker();
+        }
+
+        return launchImagePicker();
+    }
+
+    private boolean shouldOpenNativeCamera(WebChromeClient.FileChooserParams params) {
+        if (params == null) return false;
+        if (params.isCaptureEnabled()) return true;
+
+        String[] acceptTypes = params.getAcceptTypes();
+        if (acceptTypes == null || acceptTypes.length == 0) return false;
+
+        for (String acceptType : acceptTypes) {
+            if (acceptType == null) continue;
+            String type = acceptType.trim().toLowerCase(java.util.Locale.ROOT);
+            if (type.startsWith("image/") || type.equals(".jpg")
+                    || type.equals(".jpeg") || type.equals(".png")
+                    || type.equals(".webp")) {
                 return true;
             }
         }
+        return false;
+    }
+
+    private boolean launchNativeCamera() {
+        Intent cameraIntent = new Intent(MediaStore.ACTION_IMAGE_CAPTURE);
+        if (cameraIntent.resolveActivity(getPackageManager()) == null) {
+            Toast.makeText(this, "Телефоннан камера қолданбасы табылмады. Галерея ашылады.",
+                    Toast.LENGTH_LONG).show();
+            return false;
+        }
 
         try {
-            Intent pickerIntent = params != null
-                    ? params.createIntent()
-                    : new Intent(Intent.ACTION_GET_CONTENT).setType("image/*");
+            pendingCameraFile = File.createTempFile("onay-camera-", ".jpg", getCacheDir());
+            pendingCameraUri = FileProvider.getUriForFile(
+                    this, getPackageName() + ".fileprovider", pendingCameraFile);
+
+            cameraIntent.putExtra(MediaStore.EXTRA_OUTPUT, pendingCameraUri);
+            cameraIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION
+                    | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+            cameraIntent.setClipData(
+                    android.content.ClipData.newRawUri("onay-camera-photo", pendingCameraUri));
+
+            startActivityForResult(cameraIntent, FILE_CHOOSER_REQUEST);
+            return true;
+        } catch (Exception error) {
+            deletePendingCameraFile();
+            Toast.makeText(this, "Жергілікті камераны ашу мүмкін болмады. Галерея ашылады.",
+                    Toast.LENGTH_LONG).show();
+            return false;
+        }
+    }
+
+    private boolean launchImagePicker() {
+        try {
+            Intent pickerIntent = new Intent(Intent.ACTION_GET_CONTENT);
+            pickerIntent.addCategory(Intent.CATEGORY_OPENABLE);
+            pickerIntent.setType("image/*");
             startActivityForResult(pickerIntent, FILE_CHOOSER_REQUEST);
             return true;
         } catch (Exception error) {
             finishFileChooser(null);
-            Toast.makeText(this, "Файл таңдау терезесін ашу мүмкін болмады.",
+            Toast.makeText(this, "Камераны немесе галереяны ашу мүмкін болмады.",
                     Toast.LENGTH_LONG).show();
             return true;
         }
+    }
+
+    private void deletePendingCameraFile() {
+        if (pendingCameraFile != null && pendingCameraFile.exists()) {
+            //noinspection ResultOfMethodCallIgnored
+            pendingCameraFile.delete();
+        }
+        pendingCameraUri = null;
+        pendingCameraFile = null;
     }
 
     private void finishFileChooser(Uri[] results) {
@@ -204,8 +246,13 @@ public class MainActivity extends Activity {
             pendingFileChooserCallback.onReceiveValue(results);
             pendingFileChooserCallback = null;
         }
-        pendingCameraUri = null;
-        pendingCameraFile = null;
+        // Keep successful camera images in cache so WebView can read the returned URI.
+        if (results == null || results.length == 0) {
+            deletePendingCameraFile();
+        } else {
+            pendingCameraUri = null;
+            pendingCameraFile = null;
+        }
     }
 
     @Override
