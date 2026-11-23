@@ -9,7 +9,6 @@ import android.graphics.Color;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
-import android.os.Environment;
 import android.os.Handler;
 import android.os.Looper;
 import android.provider.Settings;
@@ -188,7 +187,7 @@ public class MainActivity extends Activity {
                     throw new IllegalStateException("Жүктеу қатесі: HTTP " + status);
                 }
 
-                long totalBytes = connection.getContentLengthLong();
+                int totalBytes = connection.getContentLength();
                 long downloadedBytes = 0;
                 try (InputStream input = connection.getInputStream();
                      FileOutputStream output = new FileOutputStream(partFile)) {
