@@ -206,6 +206,44 @@ public class MainActivity extends Activity {
         }
     }
 
+    private void launchNativeCamera() {
+        Intent cameraIntent = new Intent(MediaStore.ACTION_IMAGE_CAPTURE);
+        try {
+            pendingCameraFile = File.createTempFile("onay-registration-photo-", ".jpg", getCacheDir());
+            pendingCameraUri = FileProvider.getUriForFile(
+                    this, getPackageName() + ".fileprovider", pendingCameraFile);
+
+            cameraIntent.putExtra(MediaStore.EXTRA_OUTPUT, pendingCameraUri);
+            cameraIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION
+                    | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+            cameraIntent.setClipData(
+                    android.content.ClipData.newRawUri("onay-registration-photo", pendingCameraUri));
+
+            // The external camera is opened only when HTML explicitly marks an
+            // input as capture-enabled (registration photo capture).
+            startActivityForResult(cameraIntent, FILE_CHOOSER_REQUEST);
+        } catch (android.content.ActivityNotFoundException error) {
+            deletePendingCameraFile();
+            finishFileChooser(null);
+            Toast.makeText(this, "Телефонда камера қолданбасы табылмады.",
+                    Toast.LENGTH_LONG).show();
+        } catch (Exception error) {
+            deletePendingCameraFile();
+            finishFileChooser(null);
+            Toast.makeText(this, "Тіркелу фотосына камераны ашу мүмкін болмады.",
+                    Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private void deletePendingCameraFile() {
+        if (pendingCameraFile != null && pendingCameraFile.exists()) {
+            //noinspection ResultOfMethodCallIgnored
+            pendingCameraFile.delete();
+        }
+        pendingCameraUri = null;
+        pendingCameraFile = null;
+    }
+
     private void finishFileChooser(Uri[] results) {
         if (pendingFileChooserCallback != null) {
             pendingFileChooserCallback.onReceiveValue(results);
