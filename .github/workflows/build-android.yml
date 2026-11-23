@@ -1,18 +1,8 @@
 name: Build Android APK
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - 'ONAY_ticket_valid_blue_expired_grayscale.html'
-      - 'image.png'
-      - 'app/**'
-      - 'build.gradle'
-      - 'settings.gradle'
-      - 'gradle.properties'
-      - '.github/workflows/build-android.yml'
 permissions:
-  contents: read
+  contents: write
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -27,18 +17,43 @@ jobs:
           gradle-version: '8.11.1'
       - name: Install Android SDK packages
         run: |
-          echo "ANDROID_HOME=$ANDROID_HOME"
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" "platforms;android-35" "build-tools;35.0.0" || sdkmanager "platforms;android-35" "build-tools;35.0.0"
-      - name: Prepare app assets and launcher icon
+      - name: Require stable signing key
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ONAY_KEYSTORE_BASE64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.ONAY_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ONAY_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ONAY_KEY_PASSWORD }}
+        run: |
+          test -n "$KEYSTORE_BASE64" || (echo "Add ONAY_KEYSTORE_BASE64 in Settings > Secrets and variables > Actions"; exit 1)
+          test -n "$KEYSTORE_PASSWORD" || (echo "Add ONAY_KEYSTORE_PASSWORD"; exit 1)
+          test -n "$KEY_ALIAS" || (echo "Add ONAY_KEY_ALIAS"; exit 1)
+          test -n "$KEY_PASSWORD" || (echo "Add ONAY_KEY_PASSWORD"; exit 1)
+          echo "$KEYSTORE_BASE64" | base64 --decode > "$RUNNER_TEMP/onay-demo-release.jks"
+      - name: Prepare HTML and launcher icon
         run: |
           mkdir -p app/src/main/assets app/src/main/res/drawable-nodpi
           cp ONAY_ticket_valid_blue_expired_grayscale.html app/src/main/assets/index.html
           cp image.png app/src/main/res/drawable-nodpi/ic_launcher.png
-      - name: Build debug APK
-        run: gradle --no-daemon :app:assembleDebug
+      - name: Build signed release APK
+        env:
+          KEYSTORE_PASSWORD: ${{ secrets.ONAY_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ONAY_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ONAY_KEY_PASSWORD }}
+        run: |
+          gradle --no-daemon :app:assembleRelease             -PappVersionCode=${{ github.run_number }}             -PappVersionName="1.0.${{ github.run_number }}"             -PsigningStoreFile="$RUNNER_TEMP/onay-demo-release.jks"             -PsigningStorePassword="$KEYSTORE_PASSWORD"             -PsigningKeyAlias="$KEY_ALIAS"             -PsigningKeyPassword="$KEY_PASSWORD"
+          mkdir -p dist
+          cp app/build/outputs/apk/release/app-release.apk dist/ONAY-Demo.apk
       - uses: actions/upload-artifact@v4
         with:
-          name: onay-demo-debug-apk
-          path: app/build/outputs/apk/debug/app-debug.apk
+          name: onay-demo-release-apk
+          path: dist/ONAY-Demo.apk
           if-no-files-found: error
-          retention-days: 14
+          retention-days: 30
+      - name: Publish latest app release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v1.0.${{ github.run_number }}
+          name: ONAY Demo v1.0.${{ github.run_number }}
+          make_latest: true
+          files: dist/ONAY-Demo.apk
