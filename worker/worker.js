@@ -147,6 +147,7 @@ async function claimPairing(request, env) {
   }
 
   const claimedAt = nowIso();
+  const claimedAtSeconds = nowSeconds();
   const result = await env.DB.prepare(
     "DELETE FROM device_pairings WHERE code_hash = ?"
   ).bind(codeHash).run();
@@ -362,7 +363,7 @@ async function claimRequestedPairing(request, env) {
   const claimedAt = nowIso();
   const result = await env.DB.prepare(
     "UPDATE pair_requests SET status = 'claimed', payload_json = NULL, claimed_at = ? WHERE request_id = ? AND status = 'approved' AND pair_code_hash = ?"
-  ).bind(claimedAt, requestId, codeHash).run();
+  ).bind(claimedAtSeconds, requestId, codeHash).run();
   if (!result.success || Number(result.meta?.changes || 0) !== 1) {
     return json({ ok: false, error: "code_already_claimed" }, 409);
   }
