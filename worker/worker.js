@@ -216,6 +216,7 @@ async function requestPairing(request, env) {
     return json({ ok: false, error: "invalid_device" }, 400);
   }
 
+  const phoneHash = await sha256Hex(phone);
   await cleanupPairRequests(env);
   await env.DB.prepare(
     "UPDATE pair_requests SET status = 'expired' WHERE phone_hash = ? AND status = 'pending'"
@@ -295,6 +296,7 @@ async function approvePairing(request, env) {
     return json({ ok: false, error: "invalid_code" }, 400);
   }
 
+  const phoneHash = await sha256Hex(phone);
   const row = await env.DB.prepare(
     "SELECT status, expires_at FROM pair_requests WHERE request_id = ? AND phone_hash = ?"
   ).bind(requestId, phoneHash).first();
