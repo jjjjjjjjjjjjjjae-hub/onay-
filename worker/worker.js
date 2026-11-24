@@ -147,7 +147,6 @@ async function claimPairing(request, env) {
   }
 
   const claimedAt = nowIso();
-  const claimedAtSeconds = nowSeconds();
   const result = await env.DB.prepare(
     "DELETE FROM device_pairings WHERE code_hash = ?"
   ).bind(codeHash).run();
@@ -361,6 +360,7 @@ async function claimRequestedPairing(request, env) {
   }
 
   const claimedAt = nowIso();
+  const claimedAtSeconds = nowSeconds();
   const result = await env.DB.prepare(
     "UPDATE pair_requests SET status = 'claimed', payload_json = NULL, claimed_at = ? WHERE request_id = ? AND status = 'approved' AND pair_code_hash = ?"
   ).bind(claimedAtSeconds, requestId, codeHash).run();
