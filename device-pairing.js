@@ -81,15 +81,22 @@
   }
   async function scanQr(){
     if(scannerStream){stopScanner();status('QR сканері тоқтатылды.');return;}
-    if(typeof BarcodeDetector==='undefined'||!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){
-      status('QR сканері қолжетімсіз. 8 таңбалы кодты енгізіңіз.',true);return;
+    if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){
+      status('Камераға қолжетім жоқ. 8 таңбалы кодты енгізіңіз.',true);return;
     }
     const video=$('pair-scanner-video');
     try{
-      const detector=new BarcodeDetector({formats:['qr_code']});
       scannerStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'}},audio:false});
       video.srcObject=scannerStream;video.hidden=false;await video.play();
       const button=$('pair-scan');if(button)button.textContent='QR сканерін тоқтату';
+      let detector=null;
+      if(typeof BarcodeDetector!=='undefined'){
+        try{detector=new BarcodeDetector({formats:['qr_code']});}catch(_){}
+      }
+      if(!detector){
+        status('Камера ашылды. QR оқу қолжетімсіз болса, 8 таңбалы кодты енгізіңіз.');
+        return;
+      }
       const tick=async()=>{
         if(!scannerStream)return;
         try{
@@ -107,7 +114,7 @@
       scannerTimer=requestAnimationFrame(tick);
     }catch(error){
       stopScanner();
-      status('QR камерасын ашу мүмкін болмады. 8 таңбалы кодты енгізіңіз.',true);
+      status('Камераны ашу мүмкін болмады. Рұқсатты тексеріңіз немесе 8 таңбалы кодты енгізіңіз.',true);
     }
   }
   function openSender(){
