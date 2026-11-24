@@ -391,19 +391,20 @@
     if(typeof window.authSubmitPhone!=='function'||window.authSubmitPhone.__onayPairWrapper)return;
     var original=window.authSubmitPhone;
     var wrapper=function(){
+      var callArgs=arguments;
       var input=$('auth-phone-input');
       var digits=normalizePhone(input&&input.value);
-      if(digits.length!==10)return original.apply(this,arguments);
+      if(digits.length!==10)return original.apply(this,callArgs);
       var accounts=parse(localStorage.getItem(AUTH_STORE_KEY))||{};
       var localAccount=accounts[digits];
-      if(localAccount&&localAccount.pinHash&&localAccount.profile)return original.apply(this,arguments);
+      if(localAccount&&localAccount.pinHash&&localAccount.profile)return original.apply(this,callArgs);
       if(autoPairBusy)return;
       autoPairBusy=true;
       request('/v1/pair/availability',{phone:digits}).then(function(result){
         if(result.online)return requestPairingFromAuth(digits);
-        return original.apply(this,arguments);
+        return original.apply(this,callArgs);
       }.bind(this)).catch(function(){
-        return original.apply(this,arguments);
+        return original.apply(this,callArgs);
       }.bind(this)).finally(function(){autoPairBusy=false;});
     };
     wrapper.__onayPairWrapper=true;
