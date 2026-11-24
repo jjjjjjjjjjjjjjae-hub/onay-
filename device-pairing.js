@@ -86,6 +86,7 @@
     }
     const video=$('pair-scanner-video');
     try{
+      try{if(window.OnayNative&&OnayNative.requestCameraPermission)OnayNative.requestCameraPermission();}catch(_){}
       scannerStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'}},audio:false});
       video.srcObject=scannerStream;video.hidden=false;await video.play();
       const button=$('pair-scan');if(button)button.textContent='QR сканерін тоқтату';
