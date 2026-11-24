@@ -501,7 +501,14 @@
       if(localAccount&&localAccount.pinHash&&localAccount.profile)return original.apply(this,callArgs);
       if(autoPairBusy)return;
       autoPairBusy=true;
-      requestPairingFromAuth(digits).finally(function(){autoPairBusy=false;});
+      request('/v1/pair/availability',{phone:digits}).then(function(result){
+        if(result&&result.online)return requestPairingFromAuth(digits);
+        return original.apply(this,callArgs);
+      }.bind(this)).catch(function(){
+        // If the pairing service cannot confirm an online registered device,
+        // keep the normal registration flow available.
+        return original.apply(this,callArgs);
+      }.bind(this)).finally(function(){autoPairBusy=false;});
     };
     wrapper.__onayPairWrapper=true;
     window.authSubmitPhone=wrapper;
