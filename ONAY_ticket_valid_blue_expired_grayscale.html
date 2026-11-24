@@ -17026,6 +17026,7 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
       clearTimeout(toastTimer); toastTimer=setTimeout(()=>toast.classList.add('hidden'), 2800);
     }
     let qrStream = null;
+    let qrPairingMode = false;
     let qrTorchOn = false;
     let qrTorchBusy = false;
     let qrTorchRequestId = 0;
@@ -17235,6 +17236,10 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
             const value=await readQrVideoFrame(video,++frames%4===0,epoch);
             if(epoch!==qrDecodeEpoch||!cameraTabIsOpen()||!qrStream)return;
             if(value){
+              if(qrPairingMode && typeof window.onayPairingQrValue === 'function'){
+                const handled=await window.onayPairingQrValue(value);
+                if(handled)return;
+              }
               const parsed=parseOnayTransportCode(value);
               if(parsed){showTransportQrResult(parsed,'scan');return;}
               if(Date.now()-qrLastInvalidAt>4000){qrLastInvalidAt=Date.now();showToast('ONAY! көлік QR-кодын сканерлеңіз');}
@@ -17269,6 +17274,32 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
       }
     }
 
+    function setQrPairingUi(active){
+      qrPairingMode=!!active;
+      window.onayQrPairingMode=qrPairingMode;
+      const title=document.querySelector('#page-qr .qr-head h2');
+      const help=document.querySelector('#page-qr .qr-help-text');
+      const manual=document.querySelector('#page-qr .qr-code-manual');
+      const manualTitle=el('qr-manual')?.querySelector('h3');
+      const manualInput=el('qr-manual-input');
+      if(qrPairingMode){
+        if(title)title.textContent='Телефонды синхрондау';
+        if(help)help.innerHTML='Бірінші телефон көрсеткен QR-кодты<br/>рамка ішіне орналастырыңыз';
+        if(manual)manual.textContent='8 таңбалы кодты қолмен енгізу';
+        if(manualTitle)manualTitle.textContent='Синхрондау кодын енгізу';
+        if(manualInput){manualInput.maxLength=8;manualInput.placeholder='00000000';manualInput.inputMode='numeric';}
+      }else{
+        if(title)title.textContent='QR пайдалану';
+        if(help)help.innerHTML='Жол ақысының төлемін көлікте немесе<br/>ONAY! серіктестерінің желісінде төлеу үшін<br/>камераны QR-кодқа жақындатыңыз';
+        if(manual)manual.textContent='Кодты қолмен теру';
+        if(manualTitle)manualTitle.textContent='Кодты қолмен теру';
+        if(manualInput){manualInput.maxLength=32;manualInput.placeholder='Кодты енгізіңіз';manualInput.inputMode='numeric';}
+      }
+    }
+    function openQrPairingPage(){
+      setQrPairingUi(true);
+      openQrPage('scan');
+    }
     function openQrPage(tab='scan') {
       el('page-qr').classList.remove('hidden');
       setQrTab(tab);
@@ -17278,7 +17309,11 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
       closeQrZoom(); closeQrManual();
       el('page-qr').classList.add('hidden');
       stopQrCamera();
+      setQrPairingUi(false);
     }
+    window.openQrPairingPage=openQrPairingPage;
+    window.stopQrCamera=stopQrCamera;
+    window.closeQrPage=closeQrPage;
     function showQrModal() { openQrPage('scan'); }
     function hideQrModal() { closeQrPage(); }
     function setQrTab(tab) {
@@ -17395,11 +17430,26 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
 
     function openQrZoom(){el('qr-zoom').hidden=false;}
     function closeQrZoom(){el('qr-zoom').hidden=true;}
-    function openQrManual(){ closeQrPage(); openCodePayPage(); setTimeout(()=>el('codepay-input')?.focus(), 30); }
+    function openQrManual(){
+      if(qrPairingMode){
+        closeQrPage();
+        setQrPairingUi(true);
+        el('page-qr').classList.remove('hidden');
+        el('qr-manual').hidden=false;
+        el('qr-manual-input').value='';
+        setTimeout(()=>el('qr-manual-input')?.focus(),30);
+        return;
+      }
+      closeQrPage(); openCodePayPage(); setTimeout(()=>el('codepay-input')?.focus(), 30);
+    }
     function closeQrManual(){el('qr-manual').hidden=true;}
     function submitQrManual(){
       const value=el('qr-manual-input').value.trim();
       if(!value){showToast('Кодты енгізіңіз');return;}
+      if(qrPairingMode && typeof window.onayPairingManualSubmit === 'function'){
+        if(window.onayPairingManualSubmit(value))closeQrManual();
+        return;
+      }
       closeQrManual();
       openCodePayPage();
       el('codepay-input').value = value;

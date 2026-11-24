@@ -99,6 +99,14 @@
     var node=$('pair-status');
     if(node){node.textContent=text||'';node.style.color=isError?'#b42318':'';}
   }
+  function pairingPageOpen(){return window.onayQrPairingMode===true&&$('page-qr')&&!$('page-qr').classList.contains('hidden');}
+  function pairingStatus(text,isError){
+    if(pairingPageOpen()){
+      if(typeof window.showToast==='function')window.showToast(text||'');
+      return;
+    }
+    status(text,isError);
+  }
   function setBusy(value){
     var button=$('pair-submit');
     if(button)button.disabled=!!value;
@@ -188,13 +196,21 @@
     var token=parsePairToken(value);
     if(!token)return false;
     if(token.requestId&&receiverRequestId&&token.requestId!==receiverRequestId){
-      status('Бұл QR басқа сұрауға тиесілі.',true);
+      pairingStatus('Бұл QR басқа сұрауға тиесілі.',true);
       return false;
     }
     stopScanner();
+    if(typeof window.stopQrCamera==='function')window.stopQrCamera();
     if(token.requestId&&!receiverRequestId){
       receiverRequestId=token.requestId;
       saveReceiverState();
+    }
+    if(pairingPageOpen()){
+      var qrInput=$('qr-manual-input');
+      if(qrInput)qrInput.value=token.code;
+      pairingStatus('QR код оқылды. Деректер алынуда…');
+      claimRequestedPair(token.code);
+      return true;
     }
     if(mode==='receiver')openReceiverCodeEntry();
     var input=$('pair-input');
@@ -202,6 +218,25 @@
     status('QR код оқылды. «Деректерді алу» батырмасын басыңыз.');
     return true;
   }
+  window.onayPairingQrValue=function(value){
+    if(!pairingPageOpen())return false;
+    var token=parsePairToken(value);
+    if(!token){
+      pairingStatus('Бұл QR синхрондау коды емес.',true);
+      return true;
+    }
+    return handlePairQrValue(value)||true;
+  };
+  window.onayPairingManualSubmit=function(value){
+    if(!pairingPageOpen()||mode!=='receiver')return false;
+    var code=String(value||'').replace(/\D/g,'');
+    if(!/^\d{8}$/.test(code)){
+      pairingStatus('8 таңбалы кодты толық енгізіңіз.',true);
+      return false;
+    }
+    claimRequestedPair(code);
+    return true;
+  };
   async function scanQr(){
     if(scannerStream){stopScanner();status('QR сканері тоқтатылды.');return;}
     if(scannerOpening)return;
@@ -453,6 +488,10 @@
     stopScanner();
     clearReceiverPolling();
     mode='receiver';
+    if(typeof window.openQrPairingPage==='function'){
+      window.openQrPairingPage();
+      return;
+    }
     $('pair-title').textContent='Код немесе QR арқылы алу';
     $('pair-text').textContent='Бірінші телефон көрсеткен 8 таңбалы кодты енгізіңіз немесе QR-ды сканерлеңіз.';
     hidePairParts();
@@ -469,6 +508,10 @@
   }
   function openReceiverCodeEntry(){
     if(mode!=='receiver')return;
+    if(typeof window.openQrPairingPage==='function'){
+      window.openQrPairingPage();
+      return;
+    }
     var openCode=$('pair-open-code');
     if(openCode)openCode.hidden=true;
     $('pair-input').hidden=false;
@@ -513,31 +556,34 @@
     if(Array.isArray(data.data.favorites))localStorage.setItem(FAVORITES_KEY,JSON.stringify(data.data.favorites));
     localStorage.setItem('onay-device-sync-last-import-v1',JSON.stringify({importedAt:new Date().toISOString(),phone:targetPhone}));
   }
-  async function claimRequestedPair(){
+  async function claimRequestedPair(codeOverride){
     if(!receiverRequestId){
-      status('Алдымен бірінші телефоннан QR немесе код сұрауын алыңыз.',true);
+      pairingStatus('Алдымен бірінші телефоннан QR немесе код сұрауын алыңыз.',true);
       return;
     }
     if(claimInFlight)return;
-    var input=$('pair-input');
-    var code=String(input&&input.value||'').replace(/\D/g,'');
+    var input=pairingPageOpen()?$('qr-manual-input'):$('pair-input');
+    var code=String(codeOverride||input&&input.value||'').replace(/\D/g,'');
     if(!/^\d{8}$/.test(code)){
-      status('8 таңбалы кодты толық енгізіңіз.',true);
+      pairingStatus('8 таңбалы кодты толық енгізіңіз.',true);
       if(input)input.focus();
       return;
     }
     claimInFlight=true;
     setBusy(true);
-    status('Деректер алынуда…');
+    pairingStatus('Деректер алынуда…');
     try{
       var result=await request('/v1/pair/claim-request',{requestId:receiverRequestId,code:code});
       var data=await decrypt(result.encryptedPayload,code);
       saveImportedData(data);
       clearReceiverState();
-      status('Синхрондау аяқталды. Қосымша ашылады…');
+      if(pairingPageOpen()&&typeof window.closeQrPage==='function'){
+        window.closeQrPage();
+        if(typeof window.showToast==='function')window.showToast('Синхрондау аяқталды. Қосымша ашылады…');
+      }else pairingStatus('Синхрондау аяқталды. Қосымша ашылады…');
       setTimeout(function(){location.reload();},700);
     }catch(error){
-      status(error.message||'Код жарамсыз немесе мерзімі өткен.',true);
+      pairingStatus(error.message||'Код жарамсыз немесе мерзімі өткен.',true);
       setBusy(false);
     }finally{
       claimInFlight=false;
@@ -554,7 +600,11 @@
       var accounts=parse(localStorage.getItem(AUTH_STORE_KEY))||{};
       var localAccount=accounts[digits];
       if(localAccount&&localAccount.pinHash&&localAccount.profile)return original.apply(this,callArgs);
-      if((mode==='requester'||mode==='receiver')&&normalizePhone(receiverPhone)===digits){showModal();return;}
+      if((mode==='requester'||mode==='receiver')&&normalizePhone(receiverPhone)===digits){
+        if(mode==='receiver'&&typeof window.openQrPairingPage==='function')window.openQrPairingPage();
+        else showModal();
+        return;
+      }
       if(autoPairBusy)return;
       autoPairBusy=true;
       request('/v1/account/status',{phone:digits}).then(function(result){
