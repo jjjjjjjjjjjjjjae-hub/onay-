@@ -65,4 +65,13 @@ CREATE TABLE IF NOT EXISTS audit_log (
 CREATE INDEX IF NOT EXISTS idx_device_pairings_expires_at ON device_pairings(expires_at);
 CREATE INDEX IF NOT EXISTS idx_pair_requests_phone_status ON pair_requests(phone_hash, status, created_at);
 CREATE INDEX IF NOT EXISTS idx_pair_requests_expires_at ON pair_requests(expires_at);
+
+CREATE TABLE IF NOT EXISTS pair_presence (
+  phone_hash TEXT PRIMARY KEY,
+  device_id TEXT NOT NULL,
+  last_seen INTEGER NOT NULL,
+  expires_at INTEGER NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_pair_presence_expires_at ON pair_presence(expires_at);
 CREATE INDEX IF NOT EXISTS idx_pair_rate_limits_window_start ON pair_rate_limits(window_start);
