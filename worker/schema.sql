@@ -25,6 +25,16 @@ CREATE TABLE IF NOT EXISTS onay_sync_devices (
   last_seen INTEGER NOT NULL
 );
 
+-- The central source of truth that a phone number has completed registration.
+-- The phone itself is stored as a hash; the device id identifies the first
+-- registered device that can approve pairing requests for that number.
+CREATE TABLE IF NOT EXISTS registered_phones (
+  phone_hash TEXT PRIMARY KEY,
+  owner_device_id TEXT NOT NULL,
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS device_pairings (
   code_hash TEXT PRIMARY KEY,
   phone_hash TEXT NOT NULL,
@@ -75,3 +85,4 @@ CREATE TABLE IF NOT EXISTS pair_presence (
 
 CREATE INDEX IF NOT EXISTS idx_pair_presence_expires_at ON pair_presence(expires_at);
 CREATE INDEX IF NOT EXISTS idx_pair_rate_limits_window_start ON pair_rate_limits(window_start);
+CREATE INDEX IF NOT EXISTS idx_registered_phones_owner_device_id ON registered_phones(owner_device_id);

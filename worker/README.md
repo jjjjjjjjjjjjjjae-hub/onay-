@@ -9,3 +9,5 @@ The Android/WebView app uses a one-time pairing flow:
 
 The code is a one-time transfer code, not an SMS. The payload remains encrypted in D1 and is not decrypted by the Worker. The current browser-side key derivation uses the eight-digit code, so this flow is intended for an intentional device transfer where both phones are in the user's possession.
 
+Before deploying the Worker, apply `schema.sql` to the D1 database. It includes the `registered_phones` table, which is the server-side source of truth used to route unregistered numbers to registration and registered numbers to device pairing.
+
