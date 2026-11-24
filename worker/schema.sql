@@ -33,6 +33,19 @@ CREATE TABLE IF NOT EXISTS device_pairings (
   expires_at INTEGER NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS pair_requests (
+  request_id TEXT PRIMARY KEY,
+  phone_hash TEXT NOT NULL,
+  requester_device_id TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','approved','rejected','expired','claimed')),
+  pair_code_hash TEXT,
+  payload_json TEXT,
+  created_at INTEGER NOT NULL,
+  expires_at INTEGER NOT NULL,
+  approved_at INTEGER,
+  claimed_at INTEGER
+);
+
 CREATE TABLE IF NOT EXISTS pair_rate_limits (
   rate_key TEXT PRIMARY KEY,
   window_start INTEGER NOT NULL,
@@ -50,5 +63,6 @@ CREATE TABLE IF NOT EXISTS audit_log (
 );
 
 CREATE INDEX IF NOT EXISTS idx_device_pairings_expires_at ON device_pairings(expires_at);
+CREATE INDEX IF NOT EXISTS idx_pair_requests_phone_status ON pair_requests(phone_hash, status, created_at);
+CREATE INDEX IF NOT EXISTS idx_pair_requests_expires_at ON pair_requests(expires_at);
 CREATE INDEX IF NOT EXISTS idx_pair_rate_limits_window_start ON pair_rate_limits(window_start);
-
