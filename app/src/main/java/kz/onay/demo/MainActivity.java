@@ -140,7 +140,7 @@ public class MainActivity extends Activity {
         root.addView(demo, bannerParams);
 
         setContentView(root);
-        requestCameraPermissionOnEntry();
+        // Camera permission is requested only after the user explicitly starts QR scanning.
         checkForUpdates();
     }
 
