@@ -11,6 +11,7 @@
   var RECEIVER_STATE_KEY='onay-device-sync-receiver-request-v1';
   var mode='', scannerStream=null, scannerTimer=null, scannerOpening=false;
   var approvalPollTimer=null, approvalStatusTimer=null, receiverPollTimer=null, presenceTimer=null, autoPairBusy=false, authHookRetryTimer=null;
+  var pairRequestInFlight=false, approvalActionInFlight=false, claimInFlight=false;
   var registeredServerPhone='', presenceInFlight=false;
   var currentApproval=null, receiverRequestId='', receiverPhone='', seenRequests={};
 
@@ -152,6 +153,7 @@
     if(approvalStatusTimer){clearInterval(approvalStatusTimer);approvalStatusTimer=null;}
   }
   function hideModal(){
+    if(approvalActionInFlight)return;
     stopScanner();
     clearReceiverPolling();
     clearApprovalStatusPolling();
@@ -182,6 +184,24 @@
     var codeMatch=text.match(/(?:ONAYPAIR[:\s-]*)?(\d{8})/i);
     return codeMatch?{requestId:'',code:codeMatch[1]}:null;
   }
+  function handlePairQrValue(value){
+    var token=parsePairToken(value);
+    if(!token)return false;
+    if(token.requestId&&receiverRequestId&&token.requestId!==receiverRequestId){
+      status('Бұл QR басқа сұрауға тиесілі.',true);
+      return false;
+    }
+    stopScanner();
+    if(token.requestId&&!receiverRequestId){
+      receiverRequestId=token.requestId;
+      saveReceiverState();
+    }
+    if(mode==='receiver')openReceiverCodeEntry();
+    var input=$('pair-input');
+    if(input)input.value=token.code;
+    status('QR код оқылды. «Деректерді алу» батырмасын басыңыз.');
+    return true;
+  }
   async function scanQr(){
     if(scannerStream){stopScanner();status('QR сканері тоқтатылды.');return;}
     if(scannerOpening)return;
@@ -210,37 +230,35 @@
       video.srcObject=scannerStream;
       await video.play();
       var button=$('pair-scan');if(button)button.textContent='QR сканерін тоқтату';
-      var detector=null;
+      var detector=null, fallbackCanvas=document.createElement('canvas'), fallbackContext=fallbackCanvas.getContext('2d',{willReadFrequently:true}), lastDecodeAt=0;
       if(typeof BarcodeDetector!=='undefined'){
         try{detector=new BarcodeDetector({formats:['qr_code']});}catch(_){}
       }
-      if(!detector){
+      if(!detector&&!window.jsQR){
         status('Камера ашылды. QR автоматты оқылмаса, 8 таңбалы кодты енгізіңіз.');
         return;
       }
       var tick=async function(){
         if(!scannerStream)return;
         try{
-          var codes=await detector.detect(video);
-          var token=parsePairToken(codes&&codes[0]?codes[0].rawValue:'');
-          if(token){
-            if(token.requestId&&receiverRequestId&&token.requestId!==receiverRequestId){
-              status('Бұл QR басқа сұрауға тиесілі.',true);
-            }else{
-              stopScanner();
-              if(token.requestId&&!receiverRequestId){
-                receiverRequestId=token.requestId;
-                saveReceiverState();
-              }
-              if(mode==='receiver')openReceiverCodeEntry();
-              var input=$('pair-input');
-              if(input)input.value=token.code;
-              status('QR код оқылды. «Деректерді алу» батырмасын басыңыз.');
+          if(Date.now()-lastDecodeAt>=180){
+            lastDecodeAt=Date.now();
+            var rawValue='';
+            if(detector){
+              var codes=await detector.detect(video);
+              rawValue=codes&&codes[0]?codes[0].rawValue:'';
+            }else if(fallbackContext&&video.readyState>=2&&video.videoWidth&&video.videoHeight){
+              var width=Math.min(video.videoWidth,960),height=Math.max(1,Math.round(video.videoHeight*width/video.videoWidth));
+              if(fallbackCanvas.width!==width||fallbackCanvas.height!==height){fallbackCanvas.width=width;fallbackCanvas.height=height;}
+              fallbackContext.drawImage(video,0,0,width,height);
+              var imageData=fallbackContext.getImageData(0,0,width,height);
+              var decoded=window.jsQR(imageData.data,width,height,{inversionAttempts:'attemptBoth'});
+              rawValue=decoded&&decoded.data||'';
             }
-            return;
+            if(handlePairQrValue(rawValue))return;
           }
         }catch(_){}
-        scannerTimer=requestAnimationFrame(tick);
+        if(scannerStream)scannerTimer=requestAnimationFrame(tick);
       };
       scannerTimer=requestAnimationFrame(tick);
     }catch(_){
@@ -308,16 +326,19 @@
     showModal();
   }
   async function rejectCurrent(){
-    if(!currentApproval)return;
+    if(!currentApproval||approvalActionInFlight)return;
+    approvalActionInFlight=true;
     setBusy(true);
     try{
       await request('/v1/pair/reject',{requestId:currentApproval.requestId,phone:accountPhone()});
       status('Сұрау қабылданбады.');
       setTimeout(hideModal,500);
     }catch(error){status(error.message,true);setBusy(false);}
+    finally{approvalActionInFlight=false;}
   }
   async function approveCurrent(){
-    if(!currentApproval)return;
+    if(!currentApproval||approvalActionInFlight)return;
+    approvalActionInFlight=true;
     setBusy(true);
     try{
       var code=randomCode();
@@ -347,6 +368,7 @@
       clearApprovalStatusPolling();
       approvalStatusTimer=setInterval(pollApprovedStatus,2000);
     }catch(error){status(error.message||'Растау сәтсіз аяқталды.',true);setBusy(false);}
+    finally{approvalActionInFlight=false;}
   }
   async function pollApprovedStatus(){
     if(!currentApproval)return;
@@ -370,8 +392,21 @@
       if(input)input.focus();
       return;
     }
+    if(pairRequestInFlight)return;
+    if((mode==='requester'||mode==='receiver')&&normalizePhone(receiverPhone)===phone){
+      showModal();
+      return;
+    }
+    var saved=parse(sessionStorage.getItem(RECEIVER_STATE_KEY));
+    if(saved&&saved.requestId&&normalizePhone(saved.phone)===phone){
+      receiverPhone=phone;
+      receiverRequestId=String(saved.requestId);
+      showReceiverWaiting(saved);
+      return;
+    }
     var node=$('auth-error');
     if(node)node.textContent='';
+    pairRequestInFlight=true;
     try{
       var result=await request('/v1/pair/request',{phone:phone,requesterDeviceId:getDeviceId()});
       receiverPhone=phone;
@@ -381,6 +416,8 @@
     }catch(error){
       showRegisteredOffline(phone);
       if(node)node.textContent='';
+    }finally{
+      pairRequestInFlight=false;
     }
   }
   function showRegisteredOffline(phone){
@@ -390,6 +427,7 @@
     mode='registered-offline';
     receiverPhone=phone;
     receiverRequestId='';
+    clearReceiverState();
     $('pair-title').textContent='Нөмір тіркелген';
     $('pair-text').textContent='Бұл нөмір бұрын тіркелген. Бірінші телефон желіге қосылғанда қайта көріңіз.';
     hidePairParts();
@@ -480,6 +518,7 @@
       status('Алдымен бірінші телефоннан QR немесе код сұрауын алыңыз.',true);
       return;
     }
+    if(claimInFlight)return;
     var input=$('pair-input');
     var code=String(input&&input.value||'').replace(/\D/g,'');
     if(!/^\d{8}$/.test(code)){
@@ -487,6 +526,7 @@
       if(input)input.focus();
       return;
     }
+    claimInFlight=true;
     setBusy(true);
     status('Деректер алынуда…');
     try{
@@ -499,6 +539,8 @@
     }catch(error){
       status(error.message||'Код жарамсыз немесе мерзімі өткен.',true);
       setBusy(false);
+    }finally{
+      claimInFlight=false;
     }
   }
   function patchAuthSubmitPhone(){
@@ -512,6 +554,7 @@
       var accounts=parse(localStorage.getItem(AUTH_STORE_KEY))||{};
       var localAccount=accounts[digits];
       if(localAccount&&localAccount.pinHash&&localAccount.profile)return original.apply(this,callArgs);
+      if((mode==='requester'||mode==='receiver')&&normalizePhone(receiverPhone)===digits){showModal();return;}
       if(autoPairBusy)return;
       autoPairBusy=true;
       request('/v1/account/status',{phone:digits}).then(function(result){

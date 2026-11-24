@@ -75,6 +75,7 @@ CREATE TABLE IF NOT EXISTS audit_log (
 CREATE INDEX IF NOT EXISTS idx_device_pairings_expires_at ON device_pairings(expires_at);
 CREATE INDEX IF NOT EXISTS idx_pair_requests_phone_status ON pair_requests(phone_hash, status, created_at);
 CREATE INDEX IF NOT EXISTS idx_pair_requests_expires_at ON pair_requests(expires_at);
+CREATE INDEX IF NOT EXISTS idx_pair_requests_requester_status ON pair_requests(phone_hash, requester_device_id, status, created_at);
 
 CREATE TABLE IF NOT EXISTS pair_presence (
   phone_hash TEXT PRIMARY KEY,
