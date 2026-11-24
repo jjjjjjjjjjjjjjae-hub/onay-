@@ -322,9 +322,32 @@
       saveReceiverState();
       showReceiverWaiting(result);
     }catch(error){
-      if(node)node.textContent=error.message||'Сұрау жіберілмеді.';
+      showReceiverOffline(phone);
+      if(node)node.textContent='';
     }
   }
+  function showReceiverOffline(phone){
+    stopScanner();
+    clearReceiverPolling();
+    clearApprovalStatusPolling();
+    mode='offline-receiver';
+    receiverPhone=phone;
+    receiverRequestId='';
+    $('pair-title').textContent='Код немесе QR арқылы алу';
+    $('pair-text').textContent='Интернетке қосылу жоқ. Камералық тіркеу ашылмайды. Интернет қосылған соң сұрауды қайта жіберіңіз.';
+    hidePairParts();
+    $('pair-input').hidden=false;
+    $('pair-input').value='';
+    $('pair-scan').hidden=false;
+    $('pair-scan').onclick=scanQr;
+    $('pair-submit').hidden=false;
+    $('pair-submit').disabled=false;
+    $('pair-submit').textContent='Қайта қосылу';
+    $('pair-submit').onclick=function(){requestPairingFromAuth(phone);};
+    status('Код/QR бөлімі дайын. Сұрау жіберу үшін интернетті қосыңыз.',true);
+    showModal();
+  }
+
   function showReceiverWaiting(result){
     stopScanner();
     clearApprovalStatusPolling();
