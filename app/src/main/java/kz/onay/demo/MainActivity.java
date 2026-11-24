@@ -18,6 +18,7 @@ import android.provider.MediaStore;
 import android.provider.Settings;
 import android.view.Gravity;
 import android.view.ViewGroup;
+import android.webkit.JavascriptInterface;
 import android.webkit.PermissionRequest;
 import android.webkit.ValueCallback;
 import android.webkit.WebChromeClient;
@@ -125,6 +126,13 @@ public class MainActivity extends Activity {
             }
         });
 
+        web.addJavascriptInterface(new Object() {
+            @JavascriptInterface
+            public void requestCameraPermission() {
+                runOnUiThread(() -> requestCameraPermissionOnEntry());
+            }
+        }, "OnayNative");
+
         web.loadUrl("https://" + APP_ASSET_HOST + "/assets/index.html");
         root.addView(web, new FrameLayout.LayoutParams(-1, -1));
 
@@ -188,6 +196,7 @@ public class MainActivity extends Activity {
                 || checkSelfPermission(Manifest.permission.CAMERA) == PackageManager.PERMISSION_GRANTED) {
             return;
         }
+        if (cameraPermissionRequestInFlight) return;
 
         cameraPermissionRequestInFlight = true;
         requestPermissions(new String[]{Manifest.permission.CAMERA}, CAMERA_PERMISSION_REQUEST);
