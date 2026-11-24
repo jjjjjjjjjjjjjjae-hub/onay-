@@ -137,7 +137,7 @@
     status('');
     setBusy(false);
   }
-  function showModal(){var modal=$('pair-modal');if(modal)modal.hidden=false;}
+  function showModal(){var modal=$('pair-modal');if(modal){modal.hidden=false;modal.removeAttribute('hidden');modal.style.display='flex';modal.style.visibility='visible';modal.style.zIndex='99999';}}
   function hidePairParts(){
     ['pair-code','pair-qr','pair-scanner-video','pair-input','pair-scan','pair-submit','pair-approval-actions'].forEach(function(id){var node=$(id);if(node)node.hidden=true;});
   }
@@ -326,6 +326,7 @@
     $('pair-submit').onclick=function(){status('Алдымен бірінші телефондағы растауды күтіңіз.');};
     status('Растауды күтіп тұр. Кодты енгізу немесе QR сканерлеу осы жерде қолжетімді.');
     showModal();
+    var modal=$('pair-modal');if(modal)modal.setAttribute('aria-label','Код енгізу және QR сканерлеу беті');
     receiverPollTimer=setInterval(pollReceiverStatus,1800);
     pollReceiverStatus();
   }
@@ -344,6 +345,7 @@
     $('pair-submit').onclick=claimRequestedPair;
     status('Бірінші телефон растады. Кодты енгізіңіз немесе QR сканерлеңіз.');
     showModal();
+    var modal=$('pair-modal');if(modal)modal.setAttribute('aria-label','Код енгізу және QR сканерлеу беті');
     setTimeout(function(){if($('pair-input'))$('pair-input').focus();},60);
   }
   async function pollReceiverStatus(){
