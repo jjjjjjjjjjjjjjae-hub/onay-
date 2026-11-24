@@ -17239,6 +17239,8 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
               if(qrPairingMode && typeof window.onayPairingQrValue === 'function'){
                 const handled=await window.onayPairingQrValue(value);
                 if(handled)return;
+                if(epoch===qrDecodeEpoch)qrDecodeTimer=setTimeout(nextFrame,180);
+                return;
               }
               const parsed=parseOnayTransportCode(value);
               if(parsed){showTransportQrResult(parsed,'scan');return;}
