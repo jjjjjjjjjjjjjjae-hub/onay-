@@ -8,6 +8,7 @@
   var AUTH_STORE_KEY='onay-virtual-child-accounts-demo-v1';
   var AUTH_LAST_PHONE_KEY='onay-demo-last-registered-phone-v1';
   var AUTH_PENDING_PHONE_KEY='onay-registration-pending-phone-v1';
+  var RECEIVER_STATE_KEY='onay-device-sync-receiver-request-v1';
   var mode='', scannerStream=null, scannerTimer=null;
   var approvalPollTimer=null, approvalStatusTimer=null, receiverPollTimer=null, presenceTimer=null, autoPairBusy=false;
   var currentApproval=null, receiverRequestId='', receiverPhone='', seenRequests={};
@@ -110,6 +111,21 @@
       }
     };
   }
+  function saveReceiverState(){
+    try{sessionStorage.setItem(RECEIVER_STATE_KEY,JSON.stringify({requestId:receiverRequestId,phone:receiverPhone}));}catch(_){}
+  }
+  function clearReceiverState(){
+    try{sessionStorage.removeItem(RECEIVER_STATE_KEY);}catch(_){}
+  }
+  function resumeReceiverRequest(){
+    if(accountPhone()||mode==='approval'||mode==='sender')return;
+    var saved=parse(sessionStorage.getItem(RECEIVER_STATE_KEY));
+    if(!saved||!saved.requestId||normalizePhone(saved.phone).length<10)return;
+    receiverRequestId=String(saved.requestId);
+    receiverPhone=normalizePhone(saved.phone);
+    showReceiverWaiting({requestId:receiverRequestId});
+  }
+
   function stopScanner(){
     if(scannerTimer){cancelAnimationFrame(scannerTimer);scannerTimer=null;}
     if(scannerStream){scannerStream.getTracks().forEach(function(track){track.stop();});scannerStream=null;}
@@ -303,6 +319,7 @@
       var result=await request('/v1/pair/request',{phone:phone,requesterDeviceId:getDeviceId()});
       receiverPhone=phone;
       receiverRequestId=result.requestId;
+      saveReceiverState();
       showReceiverWaiting(result);
     }catch(error){
       if(node)node.textContent=error.message||'Сұрау жіберілмеді.';
@@ -355,6 +372,7 @@
       if(result.status==='approved')showReceiverApproved();
       else if(result.status==='rejected'||result.status==='expired'){
         clearReceiverPolling();
+        clearReceiverState();
         status('Бірінші телефон сұрауды қабылдамады немесе уақыты өтті.',true);
       }
     }catch(error){
@@ -391,6 +409,7 @@
       var result=await request('/v1/pair/claim-request',{requestId:receiverRequestId,code:code});
       var data=await decrypt(result.encryptedPayload,code);
       saveImportedData(data);
+      clearReceiverState();
       status('Синхрондау аяқталды. Қосымша ашылады…');
       setTimeout(function(){location.reload();},700);
     }catch(error){
@@ -431,9 +450,10 @@
     }
     var authContent=$('auth-content');
     if(authContent){
-      var observer=new MutationObserver(function(){patchAuthSubmitPhone();});
+      var observer=new MutationObserver(function(){patchAuthSubmitPhone();resumeReceiverRequest();});
       observer.observe(authContent,{childList:true,subtree:true});
       patchAuthSubmitPhone();
+      resumeReceiverRequest();
     }
     startApprovalPolling();
   }
