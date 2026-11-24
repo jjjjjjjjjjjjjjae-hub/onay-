@@ -9,13 +9,19 @@
   var AUTH_LAST_PHONE_KEY='onay-demo-last-registered-phone-v1';
   var AUTH_PENDING_PHONE_KEY='onay-registration-pending-phone-v1';
   var RECEIVER_STATE_KEY='onay-device-sync-receiver-request-v1';
-  var mode='', scannerStream=null, scannerTimer=null;
-  var approvalPollTimer=null, approvalStatusTimer=null, receiverPollTimer=null, presenceTimer=null, autoPairBusy=false;
+  var mode='', scannerStream=null, scannerTimer=null, scannerOpening=false;
+  var approvalPollTimer=null, approvalStatusTimer=null, receiverPollTimer=null, presenceTimer=null, autoPairBusy=false, authHookRetryTimer=null;
   var currentApproval=null, receiverRequestId='', receiverPhone='', seenRequests={};
 
   function $(id){return document.getElementById(id);}
   function parse(value){try{return value?JSON.parse(value):null;}catch(_){return null;}}
-  function normalizePhone(value){return String(value||'').replace(/\D/g,'').slice(0,15);}
+  function normalizePhone(value){
+    var digits=String(value||'').replace(/\D/g,'');
+    // Kazakhstan numbers may be entered as +7XXXXXXXXXX or 8XXXXXXXXXX.
+    // Pairing and local account storage use the same ten-digit form.
+    if(digits.length===11&&(digits.charAt(0)==='7'||digits.charAt(0)==='8'))digits=digits.slice(1);
+    return digits.slice(0,15);
+  }
   function getDeviceId(){
     var id=localStorage.getItem(DEVICE_KEY);
     if(!id){
@@ -118,7 +124,7 @@
     try{sessionStorage.removeItem(RECEIVER_STATE_KEY);}catch(_){}
   }
   function resumeReceiverRequest(){
-    if(accountPhone()||mode==='approval'||mode==='sender')return;
+    if(accountPhone()||mode==='approval'||mode==='sender'||mode==='requester'||mode==='receiver'||mode==='offline-receiver')return;
     var saved=parse(sessionStorage.getItem(RECEIVER_STATE_KEY));
     if(!saved||!saved.requestId||normalizePhone(saved.phone).length<10)return;
     receiverRequestId=String(saved.requestId);
@@ -173,20 +179,40 @@
   }
   async function scanQr(){
     if(scannerStream){stopScanner();status('QR сканері тоқтатылды.');return;}
+    if(scannerOpening)return;
     if(!navigator.mediaDevices||!navigator.mediaDevices.getUserMedia){
       status('Камераға қолжетім жоқ. 8 таңбалы кодты енгізіңіз.',true);return;
     }
     var video=$('pair-scanner-video');
+    if(!video){
+      status('QR сканері дайын емес. Терезені қайта ашыңыз.',true);return;
+    }
+    scannerOpening=true;
+    showModal();
+    video.autoplay=true;
+    video.muted=true;
+    video.setAttribute('playsinline','');
+    video.setAttribute('webkit-playsinline','');
+    video.hidden=false;
     try{
-      try{if(window.OnayNative&&OnayNative.requestCameraPermission)OnayNative.requestCameraPermission();}catch(_){}
+      try{
+        if(window.OnayNative&&OnayNative.requestCameraPermission){
+          OnayNative.requestCameraPermission();
+          await new Promise(function(resolve){setTimeout(resolve,150);});
+        }
+      }catch(_){}
       scannerStream=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:'environment'}},audio:false});
-      video.srcObject=scannerStream;video.hidden=false;await video.play();
+      video.srcObject=scannerStream;
+      await video.play();
       var button=$('pair-scan');if(button)button.textContent='QR сканерін тоқтату';
       var detector=null;
       if(typeof BarcodeDetector!=='undefined'){
         try{detector=new BarcodeDetector({formats:['qr_code']});}catch(_){}
       }
-      if(!detector){status('Камера ашылды. QR автоматты оқылмаса, 8 таңбалы кодты енгізіңіз.');return;}
+      if(!detector){
+        status('Камера ашылды. QR автоматты оқылмаса, 8 таңбалы кодты енгізіңіз.');
+        return;
+      }
       var tick=async function(){
         if(!scannerStream)return;
         try{
@@ -197,7 +223,22 @@
               status('Бұл QR басқа сұрауға тиесілі.',true);
             }else{
               stopScanner();
-              $('pair-input').value=token.code;
+              if(token.requestId&&!receiverRequestId){
+                receiverRequestId=token.requestId;
+                saveReceiverState();
+              }
+              var input=$('pair-input');
+              if(input)input.value=token.code;
+              if(mode==='offline-receiver'&&receiverRequestId){
+                mode='receiver';
+                var submit=$('pair-submit');
+                if(submit){
+                  submit.hidden=false;
+                  submit.disabled=false;
+                  submit.textContent='Деректерді алу';
+                  submit.onclick=claimRequestedPair;
+                }
+              }
               status('QR код оқылды. «Деректерді алу» батырмасын басыңыз.');
             }
             return;
@@ -209,6 +250,8 @@
     }catch(_){
       stopScanner();
       status('Камераны ашу мүмкін болмады. Рұқсатты тексеріңіз немесе кодты енгізіңіз.',true);
+    }finally{
+      scannerOpening=false;
     }
   }
   function isApproverReady(){
@@ -334,7 +377,7 @@
     receiverPhone=phone;
     receiverRequestId='';
     $('pair-title').textContent='Код немесе QR арқылы алу';
-    $('pair-text').textContent='Интернетке қосылу жоқ. Камералық тіркеу ашылмайды. Интернет қосылған соң сұрауды қайта жіберіңіз.';
+    $('pair-text').textContent='Сұрау жіберілмеді. Бұл нөмір тіркелуге жіберілмейді. Интернетті қосып, қайта көріңіз.';
     hidePairParts();
     $('pair-input').hidden=false;
     $('pair-input').value='';
@@ -371,6 +414,7 @@
     pollReceiverStatus();
   }
   function showReceiverApproved(){
+    stopScanner();
     clearReceiverPolling();
     mode='receiver';
     $('pair-title').textContent='Код немесе QR арқылы алу';
@@ -419,6 +463,10 @@
     localStorage.setItem('onay-device-sync-last-import-v1',JSON.stringify({importedAt:new Date().toISOString(),phone:targetPhone}));
   }
   async function claimRequestedPair(){
+    if(!receiverRequestId){
+      status('Алдымен бірінші телефоннан QR немесе код сұрауын алыңыз.',true);
+      return;
+    }
     var input=$('pair-input');
     var code=String(input&&input.value||'').replace(/\D/g,'');
     if(!/^\d{8}$/.test(code)){
@@ -447,7 +495,7 @@
       var callArgs=arguments;
       var input=$('auth-phone-input');
       var digits=normalizePhone(input&&input.value);
-      if(digits.length!==10)return original.apply(this,callArgs);
+      if(digits.length<10||digits.length>15)return original.apply(this,callArgs);
       var accounts=parse(localStorage.getItem(AUTH_STORE_KEY))||{};
       var localAccount=accounts[digits];
       if(localAccount&&localAccount.pinHash&&localAccount.profile)return original.apply(this,callArgs);
@@ -458,6 +506,16 @@
     wrapper.__onayPairWrapper=true;
     window.authSubmitPhone=wrapper;
   }
+  function watchAuthFlow(){
+    var authContent=$('auth-content');
+    if(authContent&&!authContent.__onayPairObserver){
+      var observer=new MutationObserver(function(){patchAuthSubmitPhone();resumeReceiverRequest();});
+      observer.observe(authContent,{childList:true,subtree:true});
+      authContent.__onayPairObserver=true;
+    }
+    patchAuthSubmitPhone();
+    resumeReceiverRequest();
+  }
   function install(){
     if(!$('pair-modal')){
       var style=document.createElement('style');
@@ -466,12 +524,17 @@
       var root=$('onay-app-root')||document.body;
       root.insertAdjacentHTML('beforeend','<div class="pair-modal" hidden id="pair-modal" onclick="if(event.target===this)closeDevicePairModal()"><div class="pair-dialog" role="dialog" aria-modal="true"><button class="pair-close" type="button" onclick="closeDevicePairModal()">×</button><h3 id="pair-title">Телефонды синхрондау</h3><p id="pair-text"></p><div class="pair-approval-actions" hidden id="pair-approval-actions"><button class="pair-approve" id="pair-approve" type="button">Растау</button><button class="pair-reject" id="pair-reject" type="button">Бас тарту</button></div><div class="pair-code" hidden id="pair-code"></div><img class="pair-qr" hidden id="pair-qr" alt="ONAY синхрондау QR коды"/><video class="pair-scanner-video" hidden id="pair-scanner-video" playsinline muted></video><input class="pair-input" hidden id="pair-input" maxlength="8" inputmode="numeric" type="tel" placeholder="00000000"/><button class="pair-scan" hidden id="pair-scan" type="button">QR сканерін ашу</button><button class="pair-submit" hidden id="pair-submit" type="button">Деректерді алу</button><p class="pair-status" id="pair-status" aria-live="polite"></p></div></div>');
     }
-    var authContent=$('auth-content');
-    if(authContent){
-      var observer=new MutationObserver(function(){patchAuthSubmitPhone();resumeReceiverRequest();});
-      observer.observe(authContent,{childList:true,subtree:true});
-      patchAuthSubmitPhone();
-      resumeReceiverRequest();
+    watchAuthFlow();
+    if(!window.authSubmitPhone||!window.authSubmitPhone.__onayPairWrapper){
+      var retries=0;
+      authHookRetryTimer=setInterval(function(){
+        watchAuthFlow();
+        retries++;
+        if((window.authSubmitPhone&&window.authSubmitPhone.__onayPairWrapper)||retries>=40){
+          clearInterval(authHookRetryTimer);
+          authHookRetryTimer=null;
+        }
+      },250);
     }
     startApprovalPolling();
   }
