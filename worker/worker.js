@@ -457,7 +457,7 @@ async function claimRequestedPairing(request, env) {
 
   const codeHash = await sha256Hex(code);
   const row = await env.DB.prepare(
-    "SELECT phone_hash, status, pair_code_hash, payload_json, expires_at FROM pair_requests WHERE request_id = ?"
+    "SELECT phone_hash, requester_device_id, status, pair_code_hash, payload_json, expires_at FROM pair_requests WHERE request_id = ?"
   ).bind(requestId).first();
 
   if (!row || row.status !== "approved" || Number(row.expires_at) <= nowSeconds()) {
@@ -482,6 +482,20 @@ async function claimRequestedPairing(request, env) {
   if (!result.success || Number(result.meta?.changes || 0) !== 1) {
     return json({ ok: false, error: "code_already_claimed" }, 409);
   }
+
+  // The claimed device becomes the only active device for this number.
+  // The old device will receive device_not_owner on its next heartbeat and
+  // immediately return to the PIN/login screen.
+  const ownership = await env.DB.prepare(
+    "UPDATE registered_phones SET owner_device_id = ?, updated_at = ? WHERE phone_hash = ?"
+  ).bind(row.requester_device_id, claimedAtSeconds, row.phone_hash).run();
+  if (!ownership.success || Number(ownership.meta?.changes || 0) !== 1) {
+    return json({ ok: false, error: "account_transfer_failed" }, 500);
+  }
+  await env.DB.prepare("DELETE FROM pair_presence WHERE phone_hash = ?").bind(row.phone_hash).run();
+  await env.DB.prepare(
+    "UPDATE pair_requests SET status = 'expired' WHERE phone_hash = ? AND status = 'pending' AND request_id <> ?"
+  ).bind(row.phone_hash, requestId).run();
 
   return json({
     ok: true,

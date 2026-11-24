@@ -89,9 +89,12 @@
         phone_not_registered:'Бұл нөмір серверде тіркелмеген.',
         owner_offline:'Нөмір иесі желіде емес. Кейін қайталаңыз.',
         device_not_owner:'Бұл құрылғы осы нөмірдің негізгі телефоны емес.',
+        account_transfer_failed:'Аккаунтты жаңа телефонға ауыстыру мүмкін болмады.',
         invalid_registration:'Тіркеу деректері толық емес.'
       };
-      throw new Error(messages[result.error]||result.error||'Серверге қосылу мүмкін болмады.');
+      var error=new Error(messages[result.error]||result.error||'Серверге қосылу мүмкін болмады.');
+      error.code=result.error||'';
+      throw error;
     }
     return result;
   }
@@ -323,10 +326,17 @@
     if(registeredServerPhone===phone)return true;
     try{
       var result=await request('/v1/account/register',{phone:phone,deviceId:getDeviceId()});
-      if(result.owner===false)return false;
+      if(result.owner===false){
+        var ownerError=new Error('Бұл құрылғы осы нөмірдің негізгі телефоны емес.');
+        ownerError.code='device_not_owner';
+        throw ownerError;
+      }
       registeredServerPhone=phone;
       return true;
-    }catch(_){return false;}
+    }catch(error){
+      if(error&&error.code==='device_not_owner')throw error;
+      return false;
+    }
   }
   async function heartbeatPresence(){
     if(!isApproverReady()||presenceInFlight)return;
@@ -336,13 +346,18 @@
     try{
       if(!await registerPhoneOnServer(phone))return;
       await request('/v1/pair/presence',{phone:phone,deviceId:getDeviceId()});
-    }catch(_){registeredServerPhone='';}
+    }catch(error){
+      registeredServerPhone='';
+      if(error&&['device_not_owner','phone_not_registered'].includes(error.code)){
+        if(typeof window.onayForceLogout==='function')window.onayForceLogout('Аккаунт басқа телефонда ашылды. Бұл телефоннан шығу орындалды.');
+      }
+    }
     finally{presenceInFlight=false;}
   }
   function startApprovalPolling(){
     if(approvalPollTimer)return;
     approvalPollTimer=setInterval(pollPendingApproval,2500);
-    presenceTimer=setInterval(heartbeatPresence,15000);
+    presenceTimer=setInterval(heartbeatPresence,5000);
     pollPendingApproval();
     heartbeatPresence();
   }
@@ -352,7 +367,7 @@
     currentApproval=requestInfo;
     mode='approval';
     $('pair-title').textContent='Жаңа телефон сұрауы';
-    $('pair-text').textContent='Осы нөмірдің деректерін екінші телефонға көшіруге рұқсат бересіз бе? Бірінші телефон аккаунттан шықпайды.';
+    $('pair-text').textContent='Осы нөмірдің деректерін екінші телефонға көшіруге рұқсат бересіз бе? Екінші телефон кіргенде бұл телефон аккаунттан шығады.';
     hidePairParts();
     $('pair-approval-actions').hidden=false;
     $('pair-approve').onclick=approveCurrent;
@@ -489,6 +504,14 @@
     clearReceiverPolling();
     mode='receiver';
     if(typeof window.openQrPairingPage==='function'){
+      var modal=$('pair-modal');
+      if(modal){
+        modal.hidden=true;
+        modal.style.display='none';
+        modal.style.visibility='hidden';
+      }
+      status('');
+      setBusy(false);
       window.openQrPairingPage();
       return;
     }
