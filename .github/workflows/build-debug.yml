@@ -7,6 +7,7 @@ on:
     paths:
       - 'app/**'
       - 'ONAY_ticket_valid_blue_expired_grayscale.html'
+      - 'device-pairing.js'
       - 'image.png'
       - 'build.gradle'
       - 'settings.gradle'
@@ -42,9 +43,20 @@ jobs:
       - name: Prepare HTML and launcher icon
         run: |
           test -s ONAY_ticket_valid_blue_expired_grayscale.html
+          test -s device-pairing.js
           test -s image.png
           mkdir -p app/src/main/assets app/src/main/res/drawable-nodpi
           cp ONAY_ticket_valid_blue_expired_grayscale.html app/src/main/assets/index.html
+          cp device-pairing.js app/src/main/assets/device-pairing.js
+          python3 - <<'PY'
+          from pathlib import Path
+          path = Path('app/src/main/assets/index.html')
+          text = path.read_text(encoding='utf-8')
+          marker = '</body>'
+          if marker not in text:
+              raise SystemExit('index.html has no closing body tag')
+          path.write_text(text.replace(marker, '<script src="device-pairing.js"></script>' + marker, 1), encoding='utf-8')
+          PY
           cp image.png app/src/main/res/drawable-nodpi/ic_launcher.png
 
       - name: Build debug APK
@@ -61,3 +73,4 @@ jobs:
           path: dist/ONAY-Demo-debug.apk
           if-no-files-found: error
           retention-days: 30
+
