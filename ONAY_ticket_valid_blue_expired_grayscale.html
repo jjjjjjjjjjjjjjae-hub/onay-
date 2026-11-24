@@ -17300,6 +17300,8 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
     }
     function openQrPairingPage(){
       setQrPairingUi(true);
+      const page=el('page-qr');
+      page.style.zIndex='99998';
       openQrPage('scan');
     }
     function openQrPage(tab='scan') {
@@ -17310,6 +17312,7 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
       closeMetroCardChooser();
       closeQrZoom(); closeQrManual();
       el('page-qr').classList.add('hidden');
+      el('page-qr').style.zIndex='';
       stopQrCamera();
       setQrPairingUi(false);
     }
@@ -18772,6 +18775,13 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
       syncTrialBalances();renderTrialTickets();renderTrialHistory();renderTrialNotifications();renderTrialHolder();refreshOnayCardDetails();
       el('onay-app-root').classList.add('app-pin-locked');el('app-pin-gate').hidden=false;authDraftPhoto='';authDraftPhotoWidth=0;authDraftPhotoHeight=0;authUploadedPhotoPath='';authDraftProfile=null;authShowStartupScreen();
     }
+    window.onayForceLogout=function(message){
+      try{if(typeof closeQrPage==='function')closeQrPage();}catch(_){ }
+      const pairModal=document.getElementById('pair-modal');
+      if(pairModal){pairModal.hidden=true;pairModal.style.display='none';pairModal.style.visibility='hidden';}
+      lockAppPin();
+      if(message)authSetError(message);
+    };
     function signOutToAppPin(){closeMenuPage(false);closeRoutesPage();setCardsTab('my');authAfterLogoutPin=true;lockAppPin();}
     function initAccountGate(withSplash=false){
       el('onay-app-root').classList.add('app-pin-locked');el('app-pin-gate').hidden=false;
