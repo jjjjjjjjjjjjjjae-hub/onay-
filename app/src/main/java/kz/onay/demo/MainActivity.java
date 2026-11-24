@@ -7,6 +7,7 @@ import android.app.ProgressDialog;
 import android.content.Intent;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
+import android.content.pm.Signature;
 import android.graphics.Color;
 import android.net.Uri;
 import android.os.Build;
@@ -39,6 +40,8 @@ import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.security.MessageDigest;
+import java.util.Locale;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -49,6 +52,8 @@ public class MainActivity extends Activity {
     private static final int CAMERA_PERMISSION_REQUEST = 702;
     private static final int FILE_CHOOSER_REQUEST = 703;
     private static final String APP_ASSET_HOST = "appassets.androidplatform.net";
+    private static final String UPDATE_APK_FILE_NAME = "ONAY-Demo-update.apk";
+    private static final String UPDATE_APK_PART_FILE_NAME = "ONAY-Demo-update.apk.part";
 
     private WebView web;
     private WebViewAssetLoader assetLoader;
@@ -389,18 +394,21 @@ public class MainActivity extends Activity {
                 if (assets == null) return;
 
                 String downloadUrl = null;
+                String expectedDigest = null;
                 for (int i = 0; i < assets.length(); i++) {
                     JSONObject asset = assets.optJSONObject(i);
                     if (asset != null && APK_ASSET_NAME.equals(asset.optString("name"))) {
                         downloadUrl = asset.optString("browser_download_url", null);
+                        expectedDigest = asset.optString("digest", null);
                         break;
                     }
                 }
                 if (downloadUrl == null || downloadUrl.trim().isEmpty()) return;
 
                 final String assetUrl = downloadUrl;
+                final String assetDigest = expectedDigest;
                 final String releaseName = release.optString("name", tag);
-                mainHandler.post(() -> showUpdateDialog(releaseName, assetUrl));
+                mainHandler.post(() -> showUpdateDialog(releaseName, assetUrl, assetDigest));
             } catch (Exception ignored) {
                 // Update checks are optional; the app remains usable offline.
             } finally {
@@ -429,17 +437,17 @@ public class MainActivity extends Activity {
         }
     }
 
-    private void showUpdateDialog(String releaseName, String downloadUrl) {
+    private void showUpdateDialog(String releaseName, String downloadUrl, String expectedDigest) {
         if (isFinishing() || isDestroyed()) return;
         new AlertDialog.Builder(this)
                 .setTitle("Жаңа нұсқа қолжетімді")
-                .setMessage(releaseName + " нұсқасы шықты. Қолданбаны жаңарту үшін APK жүктеліп, Android орнату терезесі ашылады.")
-                .setPositiveButton("Жаңарту", (dialog, which) -> downloadUpdate(downloadUrl))
+                .setMessage(releaseName + " нұсқасы шықты. Рұқсат берсеңіз, APK тексеріліп жүктеледі де, Android қолданбаны өшірмей үстінен жаңартады.")
+                .setPositiveButton("Жаңартуға рұқсат беру", (dialog, which) -> downloadUpdate(downloadUrl, expectedDigest))
                 .setNegativeButton("Кейін", null)
                 .show();
     }
 
-    private void downloadUpdate(String downloadUrl) {
+    private void downloadUpdate(String downloadUrl, String expectedDigest) {
         downloadDialog = new ProgressDialog(this);
         downloadDialog.setTitle("Жаңарту жүктелуде");
         downloadDialog.setMessage("Жүктелуде...");
@@ -450,9 +458,12 @@ public class MainActivity extends Activity {
 
         new Thread(() -> {
             HttpURLConnection connection = null;
-            File partFile = new File(getCacheDir(), "ONAY-Demo-update.apk.part");
-            updateApkFile = new File(getCacheDir(), "ONAY-Demo-update.apk");
+            File partFile = new File(getCacheDir(), UPDATE_APK_PART_FILE_NAME);
+            updateApkFile = new File(getCacheDir(), UPDATE_APK_FILE_NAME);
             try {
+                if (partFile.exists() && !partFile.delete()) {
+                    throw new IllegalStateException("Алдыңғы жаңарту файлын тазалау мүмкін болмады.");
+                }
                 URL url = new URL(downloadUrl);
                 connection = (HttpURLConnection) url.openConnection();
                 connection.setConnectTimeout(15000);
@@ -490,6 +501,7 @@ public class MainActivity extends Activity {
                 if (partFile.length() < 100_000) {
                     throw new IllegalStateException("Жүктелген APK файлы жарамсыз.");
                 }
+                verifyDownloadedApk(partFile, expectedDigest);
                 if (updateApkFile.exists() && !updateApkFile.delete()) {
                     throw new IllegalStateException("Ескі уақытша файлды өшіру мүмкін болмады.");
                 }
@@ -527,6 +539,9 @@ public class MainActivity extends Activity {
     }
 
     private void installDownloadedUpdate() {
+        if (updateApkFile == null) {
+            updateApkFile = new File(getCacheDir(), UPDATE_APK_FILE_NAME);
+        }
         if (updateApkFile == null || !updateApkFile.exists()) {
             Toast.makeText(this, "Жаңарту файлы табылмады.", Toast.LENGTH_LONG).show();
             return;
@@ -551,14 +566,91 @@ public class MainActivity extends Activity {
         try {
             Uri apkUri = FileProvider.getUriForFile(
                     this, getPackageName() + ".fileprovider", updateApkFile);
-            Intent installIntent = new Intent(Intent.ACTION_VIEW);
+            Intent installIntent = new Intent(Intent.ACTION_INSTALL_PACKAGE);
             installIntent.setDataAndType(apkUri, "application/vnd.android.package-archive");
+            installIntent.putExtra(Intent.EXTRA_NOT_UNKNOWN_SOURCE, true);
             installIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
             installIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             startActivity(installIntent);
         } catch (Exception error) {
             Toast.makeText(this, "Орнату терезесін ашу мүмкін болмады.", Toast.LENGTH_LONG).show();
         }
+    }
+
+    private void verifyDownloadedApk(File apkFile, String expectedDigest) throws Exception {
+        if (expectedDigest != null && !expectedDigest.trim().isEmpty()) {
+            String normalizedExpected = expectedDigest.trim().toLowerCase(Locale.US);
+            if (normalizedExpected.startsWith("sha256:")) {
+                normalizedExpected = normalizedExpected.substring("sha256:".length());
+            }
+            String actualDigest = sha256(apkFile);
+            if (!normalizedExpected.equals(actualDigest)) {
+                throw new IllegalStateException("Жаңарту файлының SHA-256 қолтаңбасы сәйкес емес.");
+            }
+        }
+
+        int flags = Build.VERSION.SDK_INT >= 28
+                ? PackageManager.GET_SIGNING_CERTIFICATES
+                : PackageManager.GET_SIGNATURES;
+        PackageInfo archiveInfo = getPackageManager().getPackageArchiveInfo(apkFile.getAbsolutePath(), flags);
+        if (archiveInfo == null || !getPackageName().equals(archiveInfo.packageName)) {
+            throw new IllegalStateException("Бұл APK ONAY Demo қолданбасына арналмаған.");
+        }
+        if (packageVersionCode(archiveInfo) <= getInstalledVersionCode()) {
+            throw new IllegalStateException("Жүктелген APK нұсқасы ескірек немесе бірдей.");
+        }
+
+        PackageInfo installedInfo = getPackageManager().getPackageInfo(getPackageName(), flags);
+        String installedSigner = signerDigest(installedInfo);
+        String archiveSigner = signerDigest(archiveInfo);
+        if (installedSigner == null || !installedSigner.equals(archiveSigner)) {
+            throw new IllegalStateException("APK signing key сәйкес емес. Қолданбаны өшірмей жаңарту мүмкін емес.");
+        }
+    }
+
+    private long packageVersionCode(PackageInfo info) {
+        if (Build.VERSION.SDK_INT >= 28) return info.getLongVersionCode();
+        return info.versionCode;
+    }
+
+    private String signerDigest(PackageInfo info) throws Exception {
+        Signature[] signatures;
+        if (Build.VERSION.SDK_INT >= 28 && info.signingInfo != null) {
+            // Compare the certificate that signs the APK contents. This keeps
+            // the check aligned with Android's in-place update requirement.
+            signatures = info.signingInfo.getApkContentsSigners();
+        } else {
+            signatures = info.signatures;
+        }
+        if (signatures == null || signatures.length == 0) return null;
+
+        MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        String first = null;
+        for (Signature signature : signatures) {
+            String current = toHex(digest.digest(signature.toByteArray()));
+            if (first == null) first = current;
+        }
+        return first;
+    }
+
+    private String sha256(File file) throws Exception {
+        MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        try (InputStream input = new java.io.FileInputStream(file)) {
+            byte[] buffer = new byte[16 * 1024];
+            int count;
+            while ((count = input.read(buffer)) != -1) {
+                digest.update(buffer, 0, count);
+            }
+        }
+        return toHex(digest.digest());
+    }
+
+    private String toHex(byte[] bytes) {
+        StringBuilder result = new StringBuilder(bytes.length * 2);
+        for (byte value : bytes) {
+            result.append(String.format(Locale.US, "%02x", value & 0xff));
+        }
+        return result.toString();
     }
 
     @Override
@@ -598,3 +690,4 @@ public class MainActivity extends Activity {
         super.onDestroy();
     }
 }
+
