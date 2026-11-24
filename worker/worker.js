@@ -216,11 +216,6 @@ async function requestPairing(request, env) {
     return json({ ok: false, error: "invalid_device" }, 400);
   }
 
-  const phoneHash = await sha256Hex(phone);
-  const ip = request.headers.get("CF-Connecting-IP") || "unknown";
-  const allowed = await rateLimit(env, `request:${ip}:${phoneHash}`, 12, 3600);
-  if (!allowed) return json({ ok: false, error: "rate_limited" }, 429);
-
   await cleanupPairRequests(env);
   await env.DB.prepare(
     "UPDATE pair_requests SET status = 'expired' WHERE phone_hash = ? AND status = 'pending'"
@@ -299,11 +294,6 @@ async function approvePairing(request, env) {
   if (!/^\d{8}$/.test(code)) {
     return json({ ok: false, error: "invalid_code" }, 400);
   }
-
-  const phoneHash = await sha256Hex(phone);
-  const ip = request.headers.get("CF-Connecting-IP") || "unknown";
-  const allowed = await rateLimit(env, `approve:${ip}:${phoneHash}`, 20, 3600);
-  if (!allowed) return json({ ok: false, error: "rate_limited" }, 429);
 
   const row = await env.DB.prepare(
     "SELECT status, expires_at FROM pair_requests WHERE request_id = ? AND phone_hash = ?"
