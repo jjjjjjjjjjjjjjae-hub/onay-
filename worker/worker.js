@@ -6,7 +6,8 @@ const CORS_HEADERS = {
 };
 
 const PAIRING_TTL_SECONDS = 10 * 60;
-const MAX_ENCRYPTED_PAYLOAD_LENGTH = 900_000;
+const PRESENCE_TTL_SECONDS = 45;
+const MAX_ENCRYPTED_PAYLOAD_LENGTH = 4_000_000;
 
 function json(body, status = 200, extraHeaders = {}) {
   return new Response(JSON.stringify(body), {
@@ -167,6 +168,40 @@ async function claimPairing(request, env) {
     encryptedPayload: stored.encryptedPayload,
     claimedAt,
   });
+}
+
+async function updatePresence(request, env) {
+  const body = await readJson(request);
+  const phone = normalizePhone(body?.phone);
+  const deviceId = normalizeDeviceId(body?.deviceId);
+  if (phone.length < 10 || phone.length > 15 || deviceId.length < 8) {
+    return json({ ok: false, error: "invalid_presence" }, 400);
+  }
+
+  const phoneHash = await sha256Hex(phone);
+  const now = nowSeconds();
+  await env.DB.prepare(
+    "INSERT OR REPLACE INTO pair_presence(phone_hash, device_id, last_seen, expires_at) VALUES (?, ?, ?, ?)"
+  ).bind(phoneHash, deviceId, now, now + PRESENCE_TTL_SECONDS).run();
+  return json({ ok: true, online: true, expiresAt: new Date((now + PRESENCE_TTL_SECONDS) * 1000).toISOString() });
+}
+
+async function checkPresence(request, env) {
+  const body = await readJson(request);
+  const phone = normalizePhone(body?.phone);
+  if (phone.length < 10 || phone.length > 15) {
+    return json({ ok: false, error: "invalid_phone" }, 400);
+  }
+
+  const phoneHash = await sha256Hex(phone);
+  const row = await env.DB.prepare(
+    "SELECT expires_at FROM pair_presence WHERE phone_hash = ?"
+  ).bind(phoneHash).first();
+  const online = !!row && Number(row.expires_at) > nowSeconds();
+  if (row && !online) {
+    await env.DB.prepare("DELETE FROM pair_presence WHERE phone_hash = ?").bind(phoneHash).run();
+  }
+  return json({ ok: true, online });
 }
 
 async function requestPairing(request, env) {
@@ -390,6 +425,8 @@ export default {
     try {
       if (url.pathname === "/v1/pair/create") return await createPairing(request, env);
       if (url.pathname === "/v1/pair/claim") return await claimPairing(request, env);
+      if (url.pathname === "/v1/pair/presence") return await updatePresence(request, env);
+      if (url.pathname === "/v1/pair/availability") return await checkPresence(request, env);
       if (url.pathname === "/v1/pair/request") return await requestPairing(request, env);
       if (url.pathname === "/v1/pair/pending") return await pendingPairing(request, env);
       if (url.pathname === "/v1/pair/reject") return await rejectPairing(request, env);
