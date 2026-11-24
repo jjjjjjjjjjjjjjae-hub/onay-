@@ -316,7 +316,15 @@
     $('pair-title').textContent='Бірінші телефонды растау';
     $('pair-text').textContent='Нөміріңіз бірінші телефонда онлайн болса, сол телефонда растау батырмасы шығады.';
     hidePairParts();
-    status('Растауды күтіп тұр…');
+    $('pair-input').hidden=false;
+    $('pair-input').value='';
+    $('pair-scan').hidden=false;
+    $('pair-scan').onclick=scanQr;
+    $('pair-submit').hidden=false;
+    $('pair-submit').disabled=true;
+    $('pair-submit').textContent='Растауды күту…';
+    $('pair-submit').onclick=function(){status('Алдымен бірінші телефондағы растауды күтіңіз.');};
+    status('Растауды күтіп тұр. Кодты енгізу немесе QR сканерлеу осы жерде қолжетімді.');
     showModal();
     receiverPollTimer=setInterval(pollReceiverStatus,1800);
     pollReceiverStatus();
@@ -328,13 +336,14 @@
     $('pair-text').textContent='Бірінші телефон көрсеткен 8 таңбалы кодты енгізіңіз немесе QR-ды сканерлеңіз.';
     hidePairParts();
     $('pair-input').hidden=false;
-    $('pair-input').value='';
     $('pair-scan').hidden=false;
     $('pair-scan').onclick=scanQr;
     $('pair-submit').hidden=false;
+    $('pair-submit').disabled=false;
     $('pair-submit').textContent='Деректерді алу';
     $('pair-submit').onclick=claimRequestedPair;
-    status('Бірінші телефон растады. Код немесе QR күтілуде.');
+    status('Бірінші телефон растады. Кодты енгізіңіз немесе QR сканерлеңіз.');
+    showModal();
     setTimeout(function(){if($('pair-input'))$('pair-input').focus();},60);
   }
   async function pollReceiverStatus(){
