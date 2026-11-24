@@ -9,7 +9,7 @@
   var AUTH_LAST_PHONE_KEY='onay-demo-last-registered-phone-v1';
   var AUTH_PENDING_PHONE_KEY='onay-registration-pending-phone-v1';
   var mode='', scannerStream=null, scannerTimer=null;
-  var approvalPollTimer=null, approvalStatusTimer=null, receiverPollTimer=null;
+  var approvalPollTimer=null, approvalStatusTimer=null, receiverPollTimer=null, presenceTimer=null, autoPairBusy=false;
   var currentApproval=null, receiverRequestId='', receiverPhone='', seenRequests={};
 
   function $(id){return document.getElementById(id);}
@@ -75,7 +75,8 @@
         request_not_approved_or_expired:'Бірінші телефон әлі растаған жоқ немесе кодтың мерзімі өтті.',
         invalid_code:'8 таңбалы код қате.',
         code_already_claimed:'Бұл код бұрын қолданылған.',
-        rate_limited:'Тым көп әрекет. Біраздан кейін қайталаңыз.'
+        rate_limited:'Тым көп әрекет. Біраздан кейін қайталаңыз.',
+        invalid_payload:'Синхрондау дерегі тым үлкен. Фото көлемі қысқартылып қайта көріңіз.'
       };
       throw new Error(messages[result.error]||result.error||'Серверге қосылу мүмкін болмады.');
     }
@@ -208,10 +209,16 @@
       }
     }catch(_){}
   }
+  async function heartbeatPresence(){
+    if(!isApproverReady())return;
+    try{await request('/v1/pair/presence',{phone:accountPhone(),deviceId:getDeviceId()});}catch(_){}
+  }
   function startApprovalPolling(){
     if(approvalPollTimer)return;
     approvalPollTimer=setInterval(pollPendingApproval,2500);
+    presenceTimer=setInterval(heartbeatPresence,15000);
     pollPendingApproval();
+    heartbeatPresence();
   }
   function openApproval(requestInfo){
     clearReceiverPolling();
@@ -241,7 +248,13 @@
     setBusy(true);
     try{
       var code=randomCode();
-      var encryptedPayload=JSON.stringify(await encrypt(payload(),code));
+      var packageData=payload();
+      var encryptedPayload=JSON.stringify(await encrypt(packageData,code));
+      if(encryptedPayload.length>3900000&&packageData.data&&packageData.data.account&&packageData.data.account.profile){
+        packageData.data.account.profile.photo=null;
+        encryptedPayload=JSON.stringify(await encrypt(packageData,code));
+      }
+      if(encryptedPayload.length>3900000)throw new Error('Синхрондау дерегі тым үлкен. Фотоны кішірейтіп қайта көріңіз.');
       var result=await request('/v1/pair/approve',{
         requestId:currentApproval.requestId,
         phone:accountPhone(),
@@ -275,26 +288,25 @@
       }
     }catch(_){}
   }
-  async function requestPairingFromAuth(){
+  async function requestPairingFromAuth(phoneOverride){
     var input=$('auth-phone-input');
-    var phone=normalizePhone(input&&input.value);
+    var phone=normalizePhone(phoneOverride||input&&input.value);
     if(phone.length<10){
       var error=$('auth-error');
       if(error)error.textContent='Телефон нөмірін толық енгізіңіз.';
       if(input)input.focus();
       return;
     }
-    var button=$('pair-auth-action');
-    if(button)button.disabled=true;
+    var node=$('auth-error');
+    if(node)node.textContent='';
     try{
       var result=await request('/v1/pair/request',{phone:phone,requesterDeviceId:getDeviceId()});
       receiverPhone=phone;
       receiverRequestId=result.requestId;
       showReceiverWaiting(result);
     }catch(error){
-      var node=$('auth-error');
       if(node)node.textContent=error.message||'Сұрау жіберілмеді.';
-    }finally{if(button)button.disabled=false;}
+    }
   }
   function showReceiverWaiting(result){
     stopScanner();
@@ -375,24 +387,27 @@
       setBusy(false);
     }
   }
-  function installAuthAction(){
-    var host=$('auth-content');
-    var input=$('auth-phone-input');
-    if(!host||!input||$('pair-auth-action'))return;
-    var button=document.createElement('button');
-    button.id='pair-auth-action';
-    button.type='button';
-    button.className='pair-auth-action';
-    button.textContent='Осы нөмірмен деректерді алу';
-    button.addEventListener('click',requestPairingFromAuth);
-    var note=document.createElement('div');
-    note.className='pair-auth-note';
-    note.textContent='Бірінші телефон растағаннан кейін код немесе QR ашылады.';
-    var primary=host.querySelector('.auth-primary');
-    if(primary)primary.insertAdjacentElement('afterend',button);
-    else host.appendChild(button);
-    if(button.nextSibling)button.parentNode.insertBefore(note,button.nextSibling);
-    else host.appendChild(note);
+  function patchAuthSubmitPhone(){
+    if(typeof window.authSubmitPhone!=='function'||window.authSubmitPhone.__onayPairWrapper)return;
+    var original=window.authSubmitPhone;
+    var wrapper=function(){
+      var input=$('auth-phone-input');
+      var digits=normalizePhone(input&&input.value);
+      if(digits.length!==10)return original.apply(this,arguments);
+      var accounts=parse(localStorage.getItem(AUTH_STORE_KEY))||{};
+      var localAccount=accounts[digits];
+      if(localAccount&&localAccount.pinHash&&localAccount.profile)return original.apply(this,arguments);
+      if(autoPairBusy)return;
+      autoPairBusy=true;
+      request('/v1/pair/availability',{phone:digits}).then(function(result){
+        if(result.online)return requestPairingFromAuth(digits);
+        return original.apply(this,arguments);
+      }.bind(this)).catch(function(){
+        return original.apply(this,arguments);
+      }.bind(this)).finally(function(){autoPairBusy=false;});
+    };
+    wrapper.__onayPairWrapper=true;
+    window.authSubmitPhone=wrapper;
   }
   function install(){
     if(!$('pair-modal')){
@@ -404,9 +419,9 @@
     }
     var authContent=$('auth-content');
     if(authContent){
-      var observer=new MutationObserver(function(){installAuthAction();});
+      var observer=new MutationObserver(function(){patchAuthSubmitPhone();});
       observer.observe(authContent,{childList:true,subtree:true});
-      installAuthAction();
+      patchAuthSubmitPhone();
     }
     startApprovalPolling();
   }
