@@ -223,9 +223,9 @@
     var token=parsePairToken(value);
     if(!token){
       pairingStatus('Бұл QR синхрондау коды емес.',true);
-      return true;
+      return false;
     }
-    return handlePairQrValue(value)||true;
+    return handlePairQrValue(value);
   };
   window.onayPairingManualSubmit=function(value){
     if(!pairingPageOpen()||mode!=='receiver')return false;
