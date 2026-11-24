@@ -292,6 +292,20 @@ async function requestPairing(request, env) {
 
   const phoneHash = registration.phoneHash;
   await cleanupPairRequests(env);
+  const existing = await env.DB.prepare(
+    "SELECT request_id, created_at, expires_at FROM pair_requests WHERE phone_hash = ? AND requester_device_id = ? AND status = 'pending' ORDER BY created_at DESC LIMIT 1"
+  ).bind(phoneHash, requesterDeviceId).first();
+  if (existing && Number(existing.expires_at) > nowSeconds()) {
+    return json({
+      ok: true,
+      requestId: existing.request_id,
+      status: "pending",
+      expiresAt: new Date(Number(existing.expires_at) * 1000).toISOString(),
+      expiresInSeconds: Math.max(0, Number(existing.expires_at) - nowSeconds()),
+      reused: true,
+    });
+  }
+
   await env.DB.prepare(
     "UPDATE pair_requests SET status = 'expired' WHERE phone_hash = ? AND status = 'pending'"
   ).bind(phoneHash).run();
