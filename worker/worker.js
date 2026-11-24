@@ -89,6 +89,71 @@ async function cleanupPairRequests(env) {
   ).bind(nowSeconds()).run();
 }
 
+async function phoneRegistrationStatus(env, phone) {
+  const phoneHash = await sha256Hex(phone);
+  const registration = await env.DB.prepare(
+    "SELECT owner_device_id FROM registered_phones WHERE phone_hash = ?"
+  ).bind(phoneHash).first();
+  if (!registration) return { phoneHash, registered: false, online: false, ownerDeviceId: "" };
+
+  const presence = await env.DB.prepare(
+    "SELECT device_id, expires_at FROM pair_presence WHERE phone_hash = ?"
+  ).bind(phoneHash).first();
+  const online = !!presence
+    && String(presence.device_id || "") === String(registration.owner_device_id || "")
+    && Number(presence.expires_at) > nowSeconds();
+  if (presence && Number(presence.expires_at) <= nowSeconds()) {
+    await env.DB.prepare("DELETE FROM pair_presence WHERE phone_hash = ?").bind(phoneHash).run();
+  }
+
+  return {
+    phoneHash,
+    registered: true,
+    online,
+    ownerDeviceId: String(registration.owner_device_id || ""),
+  };
+}
+
+async function registerPhone(request, env) {
+  const body = await readJson(request);
+  const phone = normalizePhone(body?.phone);
+  const deviceId = normalizeDeviceId(body?.deviceId);
+  if (phone.length < 10 || phone.length > 15 || deviceId.length < 8) {
+    return json({ ok: false, error: "invalid_registration" }, 400);
+  }
+
+  const phoneHash = await sha256Hex(phone);
+  const now = nowSeconds();
+  const existing = await env.DB.prepare(
+    "SELECT owner_device_id FROM registered_phones WHERE phone_hash = ?"
+  ).bind(phoneHash).first();
+
+  if (!existing) {
+    await env.DB.prepare(
+      "INSERT INTO registered_phones(phone_hash, owner_device_id, created_at, updated_at) VALUES (?, ?, ?, ?)"
+    ).bind(phoneHash, deviceId, now, now).run();
+    return json({ ok: true, registered: true, owner: true });
+  }
+
+  const owner = String(existing.owner_device_id || "") === deviceId;
+  if (owner) {
+    await env.DB.prepare(
+      "UPDATE registered_phones SET updated_at = ? WHERE phone_hash = ?"
+    ).bind(now, phoneHash).run();
+  }
+  return json({ ok: true, registered: true, owner });
+}
+
+async function accountStatus(request, env) {
+  const body = await readJson(request);
+  const phone = normalizePhone(body?.phone);
+  if (phone.length < 10 || phone.length > 15) {
+    return json({ ok: false, error: "invalid_phone" }, 400);
+  }
+  const status = await phoneRegistrationStatus(env, phone);
+  return json({ ok: true, registered: status.registered, online: status.online });
+}
+
 async function createPairing(request, env) {
   const body = await readJson(request);
   const phone = normalizePhone(body?.phone);
@@ -178,7 +243,15 @@ async function updatePresence(request, env) {
     return json({ ok: false, error: "invalid_presence" }, 400);
   }
 
-  const phoneHash = await sha256Hex(phone);
+  const registration = await phoneRegistrationStatus(env, phone);
+  if (!registration.registered) {
+    return json({ ok: false, error: "phone_not_registered" }, 404);
+  }
+  if (registration.ownerDeviceId !== deviceId) {
+    return json({ ok: false, error: "device_not_owner" }, 403);
+  }
+
+  const phoneHash = registration.phoneHash;
   const now = nowSeconds();
   await env.DB.prepare(
     "INSERT OR REPLACE INTO pair_presence(phone_hash, device_id, last_seen, expires_at) VALUES (?, ?, ?, ?)"
@@ -193,15 +266,8 @@ async function checkPresence(request, env) {
     return json({ ok: false, error: "invalid_phone" }, 400);
   }
 
-  const phoneHash = await sha256Hex(phone);
-  const row = await env.DB.prepare(
-    "SELECT expires_at FROM pair_presence WHERE phone_hash = ?"
-  ).bind(phoneHash).first();
-  const online = !!row && Number(row.expires_at) > nowSeconds();
-  if (row && !online) {
-    await env.DB.prepare("DELETE FROM pair_presence WHERE phone_hash = ?").bind(phoneHash).run();
-  }
-  return json({ ok: true, online });
+  const status = await phoneRegistrationStatus(env, phone);
+  return json({ ok: true, registered: status.registered, online: status.online });
 }
 
 async function requestPairing(request, env) {
@@ -216,7 +282,15 @@ async function requestPairing(request, env) {
     return json({ ok: false, error: "invalid_device" }, 400);
   }
 
-  const phoneHash = await sha256Hex(phone);
+  const registration = await phoneRegistrationStatus(env, phone);
+  if (!registration.registered) {
+    return json({ ok: false, error: "phone_not_registered" }, 404);
+  }
+  if (!registration.online) {
+    return json({ ok: false, error: "owner_offline" }, 409);
+  }
+
+  const phoneHash = registration.phoneHash;
   await cleanupPairRequests(env);
   await env.DB.prepare(
     "UPDATE pair_requests SET status = 'expired' WHERE phone_hash = ? AND status = 'pending'"
@@ -417,6 +491,8 @@ export default {
     try {
       if (url.pathname === "/v1/pair/create") return await createPairing(request, env);
       if (url.pathname === "/v1/pair/claim") return await claimPairing(request, env);
+      if (url.pathname === "/v1/account/register") return await registerPhone(request, env);
+      if (url.pathname === "/v1/account/status") return await accountStatus(request, env);
       if (url.pathname === "/v1/pair/presence") return await updatePresence(request, env);
       if (url.pathname === "/v1/pair/availability") return await checkPresence(request, env);
       if (url.pathname === "/v1/pair/request") return await requestPairing(request, env);

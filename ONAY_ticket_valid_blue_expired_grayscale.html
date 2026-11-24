@@ -3033,6 +3033,49 @@ body{display:flex!important;align-items:stretch!important;justify-content:center
   #page-my-tickets .trial-ticket-card { min-height:41cqw!important; }
 }
 </style>
+<style id="viewport-safe-navigation">
+/* Keep every navigation target inside the visible touch area. */
+html,body{height:100%;min-height:100%;overflow:hidden;}
+#onay-app-root{
+  height:100svh!important;
+  max-height:100svh!important;
+  min-height:0!important;
+  box-sizing:border-box!important;
+}
+#page-main{min-height:0!important;overflow:hidden!important;}
+#page-main .onay-bottom-bar{
+  bottom:max(8px,env(safe-area-inset-bottom))!important;
+  height:68px!important;
+  min-height:68px!important;
+  padding:4px 7px 4px!important;
+  border-radius:22px!important;
+  box-sizing:border-box!important;
+}
+#page-main .cards-peek-sheet{
+  bottom:calc(68px + max(8px,env(safe-area-inset-bottom)))!important;
+}
+#my-cards-panel{
+  padding-bottom:calc(161px + max(8px,env(safe-area-inset-bottom)))!important;
+}
+#page-routes .route-bottom-nav{
+  margin:0 8px max(8px,env(safe-area-inset-bottom))!important;
+  border-radius:22px!important;
+  box-sizing:border-box!important;
+}
+#page-routes .route-catalog-scroll{
+  padding-bottom:calc(132px + max(8px,env(safe-area-inset-bottom)))!important;
+}
+#page-life .life-bottom-bar,#page-menu .menu-bottom-bar{
+  margin-bottom:max(8px,env(safe-area-inset-bottom))!important;
+  border-radius:22px!important;
+  box-sizing:border-box!important;
+}
+@media(max-height:680px){
+  #page-routes .route-catalog-scroll{
+    padding-bottom:calc(115px + max(8px,env(safe-area-inset-bottom)))!important;
+  }
+}
+</style>
 
 </head>
 <body class="bg-slate-900 flex justify-center items-center min-h-screen p-0 sm:p-4">
