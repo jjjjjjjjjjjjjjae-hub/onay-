@@ -26,6 +26,10 @@ import android.widget.FrameLayout;
 import android.widget.Toast;
 
 import androidx.core.content.FileProvider;
+import androidx.core.graphics.Insets;
+import androidx.core.view.ViewCompat;
+import androidx.core.view.WindowCompat;
+import androidx.core.view.WindowInsetsCompat;
 import androidx.webkit.WebViewAssetLoader;
 import androidx.webkit.WebViewClientCompat;
 
@@ -76,6 +80,22 @@ public class MainActivity extends Activity {
 
         FrameLayout root = new FrameLayout(this);
         web = new WebView(this);
+
+        // The app is edge-to-edge on recent Android versions. Reserve the
+        // system bars outside the WebView so the HTML header, back buttons,
+        // notification button and bottom navigation stay in the touch-safe
+        // visible area instead of being drawn underneath them.
+        WindowCompat.setDecorFitsSystemWindows(getWindow(), false);
+        getWindow().setStatusBarColor(android.graphics.Color.WHITE);
+        getWindow().setNavigationBarColor(android.graphics.Color.WHITE);
+        getWindow().getDecorView().setSystemUiVisibility(
+                android.view.View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR
+                        | android.view.View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR);
+        ViewCompat.setOnApplyWindowInsetsListener(root, (view, insets) -> {
+            Insets bars = insets.getInsets(WindowInsetsCompat.Type.systemBars());
+            view.setPadding(bars.left, bars.top, bars.right, bars.bottom);
+            return insets;
+        });
 
         WebSettings settings = web.getSettings();
         settings.setJavaScriptEnabled(true);
@@ -139,6 +159,7 @@ public class MainActivity extends Activity {
         root.addView(web, new FrameLayout.LayoutParams(-1, -1));
 
         setContentView(root);
+        ViewCompat.requestApplyInsets(root);
         requestCameraPermissionOnEntry();
     }
 
@@ -773,4 +794,5 @@ public class MainActivity extends Activity {
         super.onDestroy();
     }
 }
+
 
