@@ -8,6 +8,7 @@
   var AUTH_STORE_KEY='onay-virtual-child-accounts-demo-v1';
   var AUTH_LAST_PHONE_KEY='onay-demo-last-registered-phone-v1';
   var AUTH_PENDING_PHONE_KEY='onay-registration-pending-phone-v1';
+  var AUTH_SERVER_SYNC_KEY='onay-account-server-synced-v1';
   var RECEIVER_STATE_KEY='onay-device-sync-receiver-request-v1';
   var mode='', scannerStream=null, scannerTimer=null, scannerOpening=false;
   var approvalPollTimer=null, approvalStatusTimer=null, receiverPollTimer=null, presenceTimer=null, autoPairBusy=false, authHookRetryTimer=null;
@@ -90,7 +91,7 @@
         invalid_payload:'Синхрондау дерегі тым үлкен. Фото көлемі қысқартылып қайта көріңіз.',
         invalid_login:'Кіру деректері қате.',
         invalid_pin:'PIN-код қате. Қайта енгізіңіз.',
-        account_not_synced:'Аккаунт серверге әлі сақталмаған. Ескі телефоннан бір рет PIN арқылы кіріп көріңіз.',
+        account_not_synced:'Профиль серверде әлі жоқ. Алдыңғы телефонда осы PIN арқылы бір рет кіріңіз — автоматты сақталады.',
         account_snapshot_invalid:'Аккаунт деректерін қалпына келтіру мүмкін болмады.',
         invalid_account_snapshot:'Аккаунт деректері тым үлкен немесе толық емес.',
         phone_not_registered:'Бұл нөмір серверде тіркелмеген.',
@@ -173,6 +174,10 @@
       var body={phone:phone,deviceId:getDeviceId(),account:data.account,lastProfile:data.lastProfile,ledger:data.ledger,favorites:data.favorites};
       if(/^\d{4}$/.test(String(pin||'')))body.pin=String(pin);
       await request('/v1/account/snapshot',body);
+      try{
+        localStorage.setItem(AUTH_SERVER_SYNC_KEY+':'+phone,new Date().toISOString());
+        if(pin&&typeof window.showToast==='function')window.showToast('Профиль серверде сақталды.');
+      }catch(_){ }
       return true;
     }catch(_){return false;}
   }
