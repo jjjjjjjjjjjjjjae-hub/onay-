@@ -477,8 +477,16 @@
       saveReceiverState();
       showReceiverWaiting(result);
     }catch(error){
-      showRegisteredOffline(phone);
-      if(node)node.textContent='';
+      if(error&&error.code==='owner_offline'){
+        showRegisteredOffline(phone);
+      }else{
+        clearReceiverState();
+        receiverRequestId='';
+        receiverPhone='';
+        if(node)node.textContent=error&&error.message
+          ?error.message
+          :'Серверге қосылу мүмкін болмады. Интернетті тексеріп, қайтадан «Жалғастыру» батырмасын басыңыз.';
+      }
     }finally{
       pairRequestInFlight=false;
     }
@@ -517,7 +525,7 @@
     stopScanner();
     clearReceiverPolling();
     mode='receiver';
-    if(typeof window.openQrPairingPage==='function'){
+    if(typeof window.openQrPairingPage==='function'&&$('page-qr')){
       var modal=$('pair-modal');
       if(modal){
         modal.hidden=true;
@@ -545,7 +553,7 @@
   }
   function openReceiverCodeEntry(){
     if(mode!=='receiver')return;
-    if(typeof window.openQrPairingPage==='function'){
+    if(typeof window.openQrPairingPage==='function'&&$('page-qr')){
       window.openQrPairingPage();
       return;
     }

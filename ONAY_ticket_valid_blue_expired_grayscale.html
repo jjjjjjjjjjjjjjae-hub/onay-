@@ -2754,6 +2754,22 @@ body{display:flex!important;align-items:stretch!important;justify-content:center
 #app-pin-gate{position:absolute;inset:0;z-index:1000;background:#f5f6fa;color:#101733;isolation:isolate;}
 #app-pin-gate[hidden],#app-pin-gate [hidden]{display:none!important;}
 #onay-app-root.app-pin-locked>:not(#app-pin-gate){visibility:hidden!important;pointer-events:none!important;}
+/* Device pairing must be usable before the local PIN is entered. The pairing
+   scanner is still gated by the server-side approval flow, but it needs to be
+   visible above the local account gate while that approval is pending. */
+#onay-app-root.app-pin-locked.app-pairing-qr-open>#page-qr{
+  display:flex!important;
+  position:absolute!important;
+  inset:0!important;
+  z-index:2147483000!important;
+  visibility:visible!important;
+  opacity:1!important;
+  pointer-events:auto!important;
+}
+#onay-app-root.app-pin-locked.app-pairing-qr-open>#app-pin-gate{
+  visibility:hidden!important;
+  pointer-events:none!important;
+}
 .auth-shell{position:absolute;inset:0;display:flex;flex-direction:column;overflow:hidden;background:#f5f6fa;font-family:Inter,Arial,sans-serif;}
 .auth-header{height:86px;min-height:86px;background:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;border-bottom:1px solid #eceef3;gap:4px;}
 .auth-brand{font-size:30px;font-weight:900;letter-spacing:-1.5px;color:#0b1534;line-height:1;}
@@ -17369,6 +17385,31 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
     function setQrPairingUi(active){
       qrPairingMode=!!active;
       window.onayQrPairingMode=qrPairingMode;
+      const root=el('onay-app-root');
+      const page=el('page-qr');
+      if(root)root.classList.toggle('app-pairing-qr-open',qrPairingMode);
+      if(page){
+        if(qrPairingMode){
+          // The PIN gate hides sibling pages with !important. Keep the
+          // approved pairing scanner visible without unlocking the app.
+          page.classList.remove('hidden');
+          page.hidden=false;
+          page.style.setProperty('display','flex','important');
+          page.style.setProperty('position','absolute','important');
+          page.style.setProperty('inset','0','important');
+          page.style.setProperty('z-index','2147483000','important');
+          page.style.setProperty('visibility','visible','important');
+          page.style.setProperty('opacity','1','important');
+          page.style.setProperty('pointer-events','auto','important');
+        }else{
+          page.style.removeProperty('display');
+          page.style.removeProperty('position');
+          page.style.removeProperty('inset');
+          page.style.removeProperty('opacity');
+          page.style.removeProperty('visibility');
+          page.style.removeProperty('pointer-events');
+        }
+      }
       const title=document.querySelector('#page-qr .qr-head h2');
       const help=document.querySelector('#page-qr .qr-help-text');
       const manual=document.querySelector('#page-qr .qr-code-manual');
@@ -17391,8 +17432,14 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
     function openQrPairingPage(){
       setQrPairingUi(true);
       const page=el('page-qr');
+      if(!page)return;
       // The legacy #page-qr rule uses !important; override it so the pairing
       // scanner stays above the PIN gate while the app is locked.
+      page.classList.remove('hidden');
+      page.hidden=false;
+      page.style.setProperty('display','flex','important');
+      page.style.setProperty('position','absolute','important');
+      page.style.setProperty('inset','0','important');
       page.style.setProperty('z-index','99998','important');
       openQrPage('scan');
     }
@@ -17531,7 +17578,10 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
       if(qrPairingMode){
         closeQrPage();
         setQrPairingUi(true);
-        el('page-qr').classList.remove('hidden');
+        const page=el('page-qr');
+        if(!page)return;
+        page.style.setProperty('z-index','99998','important');
+        page.classList.remove('hidden');
         el('qr-manual').hidden=false;
         el('qr-manual-input').value='';
         setTimeout(()=>el('qr-manual-input')?.focus(),30);
@@ -18446,6 +18496,20 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
       try{localStorage.setItem(AUTH_LAST_PHONE_KEY,phone);}catch(_){}
       try{sessionStorage.setItem(AUTH_PENDING_PHONE_KEY,phone);}catch(_){}
     }
+    function authForgetLocalAccount(phone){
+      const digits=authDigits(phone);
+      if(digits.length!==10)return;
+      const accounts=authLoadAccounts();
+      if(Object.prototype.hasOwnProperty.call(accounts,digits)){
+        delete accounts[digits];
+        authSaveAccounts(accounts);
+      }
+      try{
+        if(localStorage.getItem(AUTH_LAST_PHONE_KEY)===digits)localStorage.removeItem(AUTH_LAST_PHONE_KEY);
+        if(sessionStorage.getItem(AUTH_PENDING_PHONE_KEY)===digits)sessionStorage.removeItem(AUTH_PENDING_PHONE_KEY);
+      }catch(_){}
+      if(authPendingPhone===digits)authPendingPhone='';
+    }
     function authShowStartupScreen(){
       const phone=authLastRegisteredPhone();
       if(phone){authPendingPhone=phone;authRememberLastPhone(phone);authRender('login-pin',{phone});}
@@ -18863,11 +18927,18 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
       const bell=el('cards-top-nav')?.querySelector('.cards-bell');bell?.focus({preventScroll:true});
     }
     function lockAppPin(showPhonePage=false){
+      const formerPhone=String(window.__onayDemoAccount?.phoneDigits||authPendingPhone||'');
       try{if(typeof window.onayPairingLogout==='function')window.onayPairingLogout();}catch(_){ }
       authStopCamera();window.__onayDemoAccount=null;activeTrialPhoneDigits='';trialLedger=loadTrialLedger();trialProfile={...EMPTY_TRIAL_PROFILE};
       syncTrialBalances();renderTrialTickets();renderTrialHistory();renderTrialNotifications();renderTrialHolder();refreshOnayCardDetails();
       el('onay-app-root').classList.add('app-pin-locked');el('app-pin-gate').hidden=false;authDraftPhoto='';authDraftPhotoWidth=0;authDraftPhotoHeight=0;authUploadedPhotoPath='';authDraftProfile=null;
-      if(showPhonePage){authPendingPhone='';authRender('phone');}
+      if(showPhonePage){
+        // A takeover invalidates this device's local copy. Otherwise a reload
+        // would resurrect the old PIN screen and leave the user in a loop.
+        authForgetLocalAccount(formerPhone);
+        authPendingPhone='';
+        authRender('phone');
+      }
       else authShowStartupScreen();
     }
     window.onayForceLogout=function(message){
