@@ -49,6 +49,8 @@ import java.util.regex.Pattern;
 public class MainActivity extends Activity {
     private static final String RELEASE_API =
             "https://api.github.com/repos/jjjjjjjjjjjjjjae-hub/onay-/releases/latest";
+    private static final String RELEASE_LATEST_APK_URL =
+            "https://github.com/jjjjjjjjjjjjjjae-hub/onay-/releases/latest/download/ONAY-Demo.apk";
     private static final String APK_ASSET_NAME = "ONAY-Demo.apk";
     private static final int CAMERA_PERMISSION_REQUEST = 702;
     private static final int FILE_CHOOSER_REQUEST = 703;
@@ -67,6 +69,10 @@ public class MainActivity extends Activity {
     private File updateApkFile;
     private boolean waitingForInstallPermission = false;
     private ProgressDialog downloadDialog;
+    private boolean updateCheckScheduled = false;
+    private volatile boolean updateCheckInFlight = false;
+    private volatile boolean updateCheckFinished = false;
+    private boolean updatePromptShown = false;
 
     @Override
     public void onCreate(Bundle state) {
@@ -149,7 +155,6 @@ public class MainActivity extends Activity {
 
         setContentView(root);
         requestCameraPermissionOnEntry();
-        checkForUpdates();
     }
 
     private void installFastCameraDefaults(WebView view) {
@@ -368,62 +373,144 @@ public class MainActivity extends Activity {
                     "QR сканері үшін камераға рұқсат қажет. Рұқсатты қолданба баптауынан қосыңыз.",
                     Toast.LENGTH_LONG).show();
         }
+        scheduleUpdateCheck();
+    }
+
+    private void scheduleUpdateCheck() {
+        if (updateCheckScheduled || updateCheckInFlight || updateCheckFinished || updatePromptShown) {
+            return;
+        }
+        updateCheckScheduled = true;
+        mainHandler.postDelayed(() -> {
+            updateCheckScheduled = false;
+            if (isFinishing() || isDestroyed()) return;
+            // Do not try to place an update dialog behind Android's camera
+            // permission dialog. onRequestPermissionsResult() retries here.
+            if (!hasWindowFocus()) {
+                scheduleUpdateCheck();
+                return;
+            }
+            checkForUpdates();
+        }, 900L);
+    }
+
+    private static final class UpdateInfo {
+        final String tag;
+        final String releaseName;
+        final String downloadUrl;
+        final String expectedDigest;
+
+        UpdateInfo(String tag, String releaseName, String downloadUrl, String expectedDigest) {
+            this.tag = tag;
+            this.releaseName = releaseName;
+            this.downloadUrl = downloadUrl;
+            this.expectedDigest = expectedDigest;
+        }
     }
 
     private void checkForUpdates() {
+        if (updateCheckInFlight || updateCheckFinished || updatePromptShown) return;
+        updateCheckInFlight = true;
         new Thread(() -> {
-            HttpURLConnection connection = null;
+            boolean completed = false;
             try {
-                URL url = new URL(RELEASE_API);
-                connection = (HttpURLConnection) url.openConnection();
-                connection.setRequestMethod("GET");
-                connection.setConnectTimeout(10000);
-                connection.setReadTimeout(10000);
-                connection.setRequestProperty("Accept", "application/vnd.github+json");
-                connection.setRequestProperty("User-Agent", "ONAY-Demo-Android-Updater");
+                // GitHub's REST API is rate-limited for unauthenticated phones.
+                // The latest-download endpoint redirects to the current release
+                // tag and does not require the API quota.
+                UpdateInfo update = fetchLatestReleaseRedirect();
+                if (update == null) update = fetchLatestReleaseFromApi();
+                if (update == null) return;
 
-                if (connection.getResponseCode() != HttpURLConnection.HTTP_OK) return;
-
-                StringBuilder response = new StringBuilder();
-                try (InputStream input = connection.getInputStream()) {
-                    byte[] buffer = new byte[4096];
-                    int count;
-                    while ((count = input.read(buffer)) != -1) {
-                        response.append(new String(buffer, 0, count, "UTF-8"));
-                    }
-                }
-
-                JSONObject release = new JSONObject(response.toString());
-                String tag = release.optString("tag_name", "");
-                long remoteVersion = versionFromTag(tag);
+                long remoteVersion = versionFromTag(update.tag);
                 long currentVersion = getInstalledVersionCode();
+                completed = true;
                 if (remoteVersion <= currentVersion) return;
-
-                JSONArray assets = release.optJSONArray("assets");
-                if (assets == null) return;
-
-                String downloadUrl = null;
-                String expectedDigest = null;
-                for (int i = 0; i < assets.length(); i++) {
-                    JSONObject asset = assets.optJSONObject(i);
-                    if (asset != null && APK_ASSET_NAME.equals(asset.optString("name"))) {
-                        downloadUrl = asset.optString("browser_download_url", null);
-                        expectedDigest = asset.optString("digest", null);
-                        break;
-                    }
-                }
-                if (downloadUrl == null || downloadUrl.trim().isEmpty()) return;
-
-                final String assetUrl = downloadUrl;
-                final String assetDigest = expectedDigest;
-                final String releaseName = release.optString("name", tag);
-                mainHandler.post(() -> showUpdateDialog(releaseName, assetUrl, assetDigest));
+                final UpdateInfo latest = update;
+                mainHandler.post(() -> showUpdateDialog(
+                        latest.releaseName, latest.downloadUrl, latest.expectedDigest));
             } catch (Exception ignored) {
                 // Update checks are optional; the app remains usable offline.
             } finally {
-                if (connection != null) connection.disconnect();
+                updateCheckFinished = completed;
+                updateCheckInFlight = false;
             }
         }).start();
+    }
+
+    private UpdateInfo fetchLatestReleaseRedirect() throws Exception {
+        HttpURLConnection connection = null;
+        try {
+            URL url = new URL(RELEASE_LATEST_APK_URL);
+            connection = (HttpURLConnection) url.openConnection();
+            connection.setInstanceFollowRedirects(false);
+            connection.setRequestMethod("HEAD");
+            connection.setConnectTimeout(10000);
+            connection.setReadTimeout(10000);
+            connection.setRequestProperty("User-Agent", "ONAY-Demo-Android-Updater");
+
+            int responseCode = connection.getResponseCode();
+            if (responseCode < 300 || responseCode >= 400) return null;
+
+            String location = connection.getHeaderField("Location");
+            if (location == null || location.trim().isEmpty()) return null;
+            URL releaseUrl = new URL(location);
+            if (!"github.com".equalsIgnoreCase(releaseUrl.getHost())) return null;
+
+            Matcher matcher = Pattern.compile(
+                    "/releases/download/([^/]+)/" + Pattern.quote(APK_ASSET_NAME))
+                    .matcher(releaseUrl.getPath());
+            if (!matcher.find()) return null;
+
+            String tag = matcher.group(1);
+            return new UpdateInfo(tag, "ONAY Demo " + tag, location, null);
+        } finally {
+            if (connection != null) connection.disconnect();
+        }
+    }
+
+    private UpdateInfo fetchLatestReleaseFromApi() throws Exception {
+        HttpURLConnection connection = null;
+        try {
+            URL url = new URL(RELEASE_API);
+            connection = (HttpURLConnection) url.openConnection();
+            connection.setRequestMethod("GET");
+            connection.setConnectTimeout(10000);
+            connection.setReadTimeout(10000);
+            connection.setRequestProperty("Accept", "application/vnd.github+json");
+            connection.setRequestProperty("User-Agent", "ONAY-Demo-Android-Updater");
+
+            if (connection.getResponseCode() != HttpURLConnection.HTTP_OK) return null;
+
+            StringBuilder response = new StringBuilder();
+            try (InputStream input = connection.getInputStream()) {
+                byte[] buffer = new byte[4096];
+                int count;
+                while ((count = input.read(buffer)) != -1) {
+                    response.append(new String(buffer, 0, count, "UTF-8"));
+                }
+            }
+
+            JSONObject release = new JSONObject(response.toString());
+            String tag = release.optString("tag_name", "");
+            JSONArray assets = release.optJSONArray("assets");
+            if (tag.trim().isEmpty() || assets == null) return null;
+
+            String downloadUrl = null;
+            String expectedDigest = null;
+            for (int i = 0; i < assets.length(); i++) {
+                JSONObject asset = assets.optJSONObject(i);
+                if (asset != null && APK_ASSET_NAME.equals(asset.optString("name"))) {
+                    downloadUrl = asset.optString("browser_download_url", null);
+                    expectedDigest = asset.optString("digest", null);
+                    break;
+                }
+            }
+            if (downloadUrl == null || downloadUrl.trim().isEmpty()) return null;
+
+            return new UpdateInfo(tag, release.optString("name", tag), downloadUrl, expectedDigest);
+        } finally {
+            if (connection != null) connection.disconnect();
+        }
     }
 
     private long versionFromTag(String tag) {
@@ -448,6 +535,7 @@ public class MainActivity extends Activity {
 
     private void showUpdateDialog(String releaseName, String downloadUrl, String expectedDigest) {
         if (isFinishing() || isDestroyed()) return;
+        updatePromptShown = true;
         new AlertDialog.Builder(this)
                 .setTitle("Жаңа нұсқа қолжетімді")
                 .setMessage(releaseName + " нұсқасы шықты. Рұқсат берсеңіз, APK тексеріліп жүктеледі де, Android қолданбаны өшірмей үстінен жаңартады.")
@@ -670,6 +758,7 @@ public class MainActivity extends Activity {
             waitingForInstallPermission = false;
             installDownloadedUpdate();
         }
+        scheduleUpdateCheck();
     }
 
     @Override
