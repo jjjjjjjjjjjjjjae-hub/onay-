@@ -4,7 +4,10 @@ import android.Manifest;
 import android.app.Activity;
 import android.app.AlertDialog;
 import android.app.ProgressDialog;
+import android.content.Context;
 import android.content.Intent;
+import android.hardware.camera2.CameraCharacteristics;
+import android.hardware.camera2.CameraManager;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.Signature;
@@ -26,6 +29,9 @@ import android.widget.FrameLayout;
 import android.widget.Toast;
 
 import androidx.core.content.FileProvider;
+import androidx.core.graphics.Insets;
+import androidx.core.view.ViewCompat;
+import androidx.core.view.WindowInsetsCompat;
 import androidx.webkit.WebViewAssetLoader;
 import androidx.webkit.WebViewClientCompat;
 
@@ -69,6 +75,9 @@ public class MainActivity extends Activity {
     private volatile boolean updateCheckInFlight = false;
     private volatile boolean updateCheckFinished = false;
     private boolean updatePromptShown = false;
+    private final Object torchLock = new Object();
+    private CameraManager cameraManager;
+    private String torchCameraId;
 
     @Override
     public void onCreate(Bundle state) {
@@ -76,6 +85,19 @@ public class MainActivity extends Activity {
 
         FrameLayout root = new FrameLayout(this);
         web = new WebView(this);
+
+        // Android 15 enforces edge-to-edge for this app's target SDK. Keep
+        // every WebView screen below the system status bar and above the
+        // navigation area, rather than trying to offset each header/button in
+        // the HTML separately.
+        ViewCompat.setOnApplyWindowInsetsListener(root, (view, insets) -> {
+            Insets systemBars = insets.getInsets(
+                    WindowInsetsCompat.Type.systemBars()
+                            | WindowInsetsCompat.Type.displayCutout());
+            view.setPadding(systemBars.left, systemBars.top,
+                    systemBars.right, systemBars.bottom);
+            return insets;
+        });
 
         WebSettings settings = web.getSettings();
         settings.setJavaScriptEnabled(true);
@@ -133,13 +155,67 @@ public class MainActivity extends Activity {
             public void requestCameraPermission() {
                 runOnUiThread(() -> requestCameraPermissionOnEntry());
             }
+
+            @JavascriptInterface
+            public boolean setTorch(boolean enabled) {
+                return setTorchEnabled(enabled);
+            }
         }, "OnayNative");
 
         web.loadUrl("https://" + APP_ASSET_HOST + "/assets/index.html");
         root.addView(web, new FrameLayout.LayoutParams(-1, -1));
 
         setContentView(root);
+        ViewCompat.requestApplyInsets(root);
         requestCameraPermissionOnEntry();
+    }
+
+    /**
+     * WebView camera tracks do not consistently expose the torch constraint on
+     * Android devices. Use the platform camera service for the rear-camera
+     * flash, while the page retains its WebRTC implementation as a browser
+     * fallback.
+     */
+    private boolean setTorchEnabled(boolean enabled) {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M
+                || checkSelfPermission(Manifest.permission.CAMERA)
+                != PackageManager.PERMISSION_GRANTED) {
+            return false;
+        }
+
+        synchronized (torchLock) {
+            try {
+                if (cameraManager == null) {
+                    cameraManager = (CameraManager) getSystemService(Context.CAMERA_SERVICE);
+                }
+                if (cameraManager == null) return false;
+
+                if (torchCameraId == null) {
+                    String fallbackId = null;
+                    for (String cameraId : cameraManager.getCameraIdList()) {
+                        CameraCharacteristics characteristics =
+                                cameraManager.getCameraCharacteristics(cameraId);
+                        if (!Boolean.TRUE.equals(characteristics.get(
+                                CameraCharacteristics.FLASH_INFO_AVAILABLE))) {
+                            continue;
+                        }
+                        if (fallbackId == null) fallbackId = cameraId;
+                        Integer facing = characteristics.get(CameraCharacteristics.LENS_FACING);
+                        if (facing != null && facing == CameraCharacteristics.LENS_FACING_BACK) {
+                            torchCameraId = cameraId;
+                            break;
+                        }
+                    }
+                    if (torchCameraId == null) torchCameraId = fallbackId;
+                }
+                if (torchCameraId == null) return false;
+
+                cameraManager.setTorchMode(torchCameraId, enabled);
+                return true;
+            } catch (Exception ignored) {
+                return false;
+            }
+        }
     }
 
     private void installFastCameraDefaults(WebView view) {
@@ -747,6 +823,12 @@ public class MainActivity extends Activity {
     }
 
     @Override
+    protected void onPause() {
+        setTorchEnabled(false);
+        super.onPause();
+    }
+
+    @Override
     public void onBackPressed() {
         if (web != null && web.canGoBack()) {
             web.goBack();
@@ -757,6 +839,7 @@ public class MainActivity extends Activity {
 
     @Override
     protected void onDestroy() {
+        setTorchEnabled(false);
         closeDownloadDialog();
         if (pendingWebPermissionRequest != null) {
             pendingWebPermissionRequest.deny();

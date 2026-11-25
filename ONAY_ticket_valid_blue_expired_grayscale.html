@@ -17557,6 +17557,7 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
       el('qr-camera').pause();
       el('qr-camera').srcObject=null;
       el('qr-camera').classList.remove('qr-camera-ready');
+      try { window.OnayNative?.setTorch(false); } catch (_) { /* Browser build: no native bridge. */ }
       ++qrTorchRequestId;qrTorchBusy=false;qrTorchOn=false;
       updateQrTorchButton();
       hideQrCameraMessage();
@@ -17575,16 +17576,26 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
       const next=!qrTorchOn,request=++qrTorchRequestId;
       qrTorchBusy=true;updateQrTorchButton();
       try {
+        // Android WebView often omits the WebRTC torch constraint even when
+        // the rear camera has a flash. The Android wrapper supplies a native
+        // bridge for that case; a normal browser keeps using constraints.
+        let appliedNatively=false;
         try {
-          await track.applyConstraints({advanced:[{torch:next}]});
-        } catch (firstError) {
-          // Кей WebView нұсқалары torch-ты advanced емес, тікелей constraint
-          // ретінде ғана қабылдайды.
-          await track.applyConstraints({torch:next});
+          if(typeof window.OnayNative?.setTorch==='function') {
+            appliedNatively=window.OnayNative.setTorch(next)===true;
+          }
+        } catch (_) { appliedNatively=false; }
+        if(!appliedNatively) {
+          try {
+            await track.applyConstraints({advanced:[{torch:next}]});
+          } catch (firstError) {
+            // Some browsers accept torch only as a direct constraint.
+            await track.applyConstraints({torch:next});
+          }
         }
         if(request!==qrTorchRequestId)return;
         const actual=track.getSettings?.().torch;
-        qrTorchOn=typeof actual==='boolean'?actual:next;
+        qrTorchOn=appliedNatively ? next : (typeof actual==='boolean'?actual:next);
       } catch(e) {
         if(request===qrTorchRequestId)showToast('Жарқылды өзгерту мүмкін болмады');
       } finally {
