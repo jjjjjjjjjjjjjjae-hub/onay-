@@ -1,6 +1,3 @@
-Warning: truncated output (original token count: 8460)
-Total output lines: 776
-
 package kz.onay.demo;
 
 import android.Manifest;
@@ -242,7 +239,319 @@ public class MainActivity extends Activity {
             pendingFileChooserCallback.onReceiveValue(null);
         }
 
-        pending…3460 tokens truncated…            connection.connect();
+        pendingFileChooserCallback = callback;
+        pendingCameraUri = null;
+        pendingCameraFile = null;
+
+        // The QR scanner uses the WebView live camera stream and never opens
+        // the external camera app. Launch the native camera only for an
+        // explicit HTML capture input used to take a registration photo.
+        if (params != null && params.isCaptureEnabled()) {
+            launchNativeCamera();
+            return true;
+        }
+
+        try {
+            Intent pickerIntent = params != null
+                    ? params.createIntent()
+                    : new Intent(Intent.ACTION_GET_CONTENT).setType("image/*");
+            startActivityForResult(pickerIntent, FILE_CHOOSER_REQUEST);
+            return true;
+        } catch (Exception error) {
+            finishFileChooser(null);
+            Toast.makeText(this, "Файл таңдау терезесін ашу мүмкін болмады.",
+                    Toast.LENGTH_LONG).show();
+            return true;
+        }
+    }
+
+    private void launchNativeCamera() {
+        Intent cameraIntent = new Intent(MediaStore.ACTION_IMAGE_CAPTURE);
+        try {
+            pendingCameraFile = File.createTempFile("onay-registration-photo-", ".jpg", getCacheDir());
+            pendingCameraUri = FileProvider.getUriForFile(
+                    this, getPackageName() + ".fileprovider", pendingCameraFile);
+
+            cameraIntent.putExtra(MediaStore.EXTRA_OUTPUT, pendingCameraUri);
+            cameraIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION
+                    | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+            cameraIntent.setClipData(
+                    android.content.ClipData.newRawUri("onay-registration-photo", pendingCameraUri));
+
+            // The external camera is opened only when HTML explicitly marks an
+            // input as capture-enabled (registration photo capture).
+            startActivityForResult(cameraIntent, FILE_CHOOSER_REQUEST);
+        } catch (android.content.ActivityNotFoundException error) {
+            deletePendingCameraFile();
+            finishFileChooser(null);
+            Toast.makeText(this, "Телефонда камера қолданбасы табылмады.",
+                    Toast.LENGTH_LONG).show();
+        } catch (Exception error) {
+            deletePendingCameraFile();
+            finishFileChooser(null);
+            Toast.makeText(this, "Тіркелу фотосына камераны ашу мүмкін болмады.",
+                    Toast.LENGTH_LONG).show();
+        }
+    }
+
+    private void deletePendingCameraFile() {
+        if (pendingCameraFile != null && pendingCameraFile.exists()) {
+            //noinspection ResultOfMethodCallIgnored
+            pendingCameraFile.delete();
+        }
+        pendingCameraUri = null;
+        pendingCameraFile = null;
+    }
+
+    private void finishFileChooser(Uri[] results) {
+        if (pendingFileChooserCallback != null) {
+            pendingFileChooserCallback.onReceiveValue(results);
+            pendingFileChooserCallback = null;
+        }
+        // Keep successful camera images in cache so WebView can read the returned URI.
+        if (results == null || results.length == 0) {
+            deletePendingCameraFile();
+        } else {
+            pendingCameraUri = null;
+            pendingCameraFile = null;
+        }
+    }
+
+    @Override
+    public void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+
+        if (requestCode != FILE_CHOOSER_REQUEST) return;
+
+        Uri[] results = null;
+        if (resultCode == RESULT_OK) {
+            if (pendingCameraUri != null && pendingCameraFile != null
+                    && pendingCameraFile.exists() && pendingCameraFile.length() > 0) {
+                results = new Uri[]{pendingCameraUri};
+            } else if (data != null && data.getData() != null) {
+                results = new Uri[]{data.getData()};
+            }
+        }
+        finishFileChooser(results);
+    }
+
+    @Override
+    public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults);
+        if (requestCode != CAMERA_PERMISSION_REQUEST) return;
+
+        cameraPermissionRequestInFlight = false;
+        boolean granted = checkSelfPermission(Manifest.permission.CAMERA)
+                == PackageManager.PERMISSION_GRANTED;
+
+        PermissionRequest request = pendingWebPermissionRequest;
+        pendingWebPermissionRequest = null;
+        if (request != null) {
+            if (granted && request.getOrigin() != null
+                    && APP_ASSET_HOST.equals(request.getOrigin().getHost())) {
+                request.grant(new String[]{PermissionRequest.RESOURCE_VIDEO_CAPTURE});
+            } else {
+                request.deny();
+            }
+        } else if (!granted) {
+            Toast.makeText(this,
+                    "QR сканері үшін камераға рұқсат қажет. Рұқсатты қолданба баптауынан қосыңыз.",
+                    Toast.LENGTH_LONG).show();
+        }
+        scheduleUpdateCheck();
+    }
+
+    private void scheduleUpdateCheck() {
+        if (updateCheckScheduled || updateCheckInFlight || updateCheckFinished || updatePromptShown) {
+            return;
+        }
+        updateCheckScheduled = true;
+        mainHandler.postDelayed(() -> {
+            updateCheckScheduled = false;
+            if (isFinishing() || isDestroyed()) return;
+            // Do not try to place an update dialog behind Android's camera
+            // permission dialog. onRequestPermissionsResult() retries here.
+            if (!hasWindowFocus()) {
+                scheduleUpdateCheck();
+                return;
+            }
+            checkForUpdates();
+        }, 900L);
+    }
+
+    private static final class UpdateInfo {
+        final String tag;
+        final String releaseName;
+        final String downloadUrl;
+        final String expectedDigest;
+
+        UpdateInfo(String tag, String releaseName, String downloadUrl, String expectedDigest) {
+            this.tag = tag;
+            this.releaseName = releaseName;
+            this.downloadUrl = downloadUrl;
+            this.expectedDigest = expectedDigest;
+        }
+    }
+
+    private void checkForUpdates() {
+        if (updateCheckInFlight || updateCheckFinished || updatePromptShown) return;
+        updateCheckInFlight = true;
+        new Thread(() -> {
+            boolean completed = false;
+            try {
+                // GitHub's REST API is rate-limited for unauthenticated phones.
+                // The latest-download endpoint redirects to the current release
+                // tag and does not require the API quota.
+                UpdateInfo update = fetchLatestReleaseRedirect();
+                if (update == null) update = fetchLatestReleaseFromApi();
+                if (update == null) return;
+
+                long remoteVersion = versionFromTag(update.tag);
+                long currentVersion = getInstalledVersionCode();
+                completed = true;
+                if (remoteVersion <= currentVersion) return;
+                final UpdateInfo latest = update;
+                mainHandler.post(() -> showUpdateDialog(
+                        latest.releaseName, latest.downloadUrl, latest.expectedDigest));
+            } catch (Exception ignored) {
+                // Update checks are optional; the app remains usable offline.
+            } finally {
+                updateCheckFinished = completed;
+                updateCheckInFlight = false;
+            }
+        }).start();
+    }
+
+    private UpdateInfo fetchLatestReleaseRedirect() throws Exception {
+        HttpURLConnection connection = null;
+        try {
+            URL url = new URL(RELEASE_LATEST_APK_URL);
+            connection = (HttpURLConnection) url.openConnection();
+            connection.setInstanceFollowRedirects(false);
+            connection.setRequestMethod("HEAD");
+            connection.setConnectTimeout(10000);
+            connection.setReadTimeout(10000);
+            connection.setRequestProperty("User-Agent", "ONAY-Demo-Android-Updater");
+
+            int responseCode = connection.getResponseCode();
+            if (responseCode < 300 || responseCode >= 400) return null;
+
+            String location = connection.getHeaderField("Location");
+            if (location == null || location.trim().isEmpty()) return null;
+            URL releaseUrl = new URL(location);
+            if (!"github.com".equalsIgnoreCase(releaseUrl.getHost())) return null;
+
+            Matcher matcher = Pattern.compile(
+                    "/releases/download/([^/]+)/" + Pattern.quote(APK_ASSET_NAME))
+                    .matcher(releaseUrl.getPath());
+            if (!matcher.find()) return null;
+
+            String tag = matcher.group(1);
+            return new UpdateInfo(tag, "ONAY Demo " + tag, location, null);
+        } finally {
+            if (connection != null) connection.disconnect();
+        }
+    }
+
+    private UpdateInfo fetchLatestReleaseFromApi() throws Exception {
+        HttpURLConnection connection = null;
+        try {
+            URL url = new URL(RELEASE_API);
+            connection = (HttpURLConnection) url.openConnection();
+            connection.setRequestMethod("GET");
+            connection.setConnectTimeout(10000);
+            connection.setReadTimeout(10000);
+            connection.setRequestProperty("Accept", "application/vnd.github+json");
+            connection.setRequestProperty("User-Agent", "ONAY-Demo-Android-Updater");
+
+            if (connection.getResponseCode() != HttpURLConnection.HTTP_OK) return null;
+
+            StringBuilder response = new StringBuilder();
+            try (InputStream input = connection.getInputStream()) {
+                byte[] buffer = new byte[4096];
+                int count;
+                while ((count = input.read(buffer)) != -1) {
+                    response.append(new String(buffer, 0, count, "UTF-8"));
+                }
+            }
+
+            JSONObject release = new JSONObject(response.toString());
+            String tag = release.optString("tag_name", "");
+            JSONArray assets = release.optJSONArray("assets");
+            if (tag.trim().isEmpty() || assets == null) return null;
+
+            String downloadUrl = null;
+            String expectedDigest = null;
+            for (int i = 0; i < assets.length(); i++) {
+                JSONObject asset = assets.optJSONObject(i);
+                if (asset != null && APK_ASSET_NAME.equals(asset.optString("name"))) {
+                    downloadUrl = asset.optString("browser_download_url", null);
+                    expectedDigest = asset.optString("digest", null);
+                    break;
+                }
+            }
+            if (downloadUrl == null || downloadUrl.trim().isEmpty()) return null;
+
+            return new UpdateInfo(tag, release.optString("name", tag), downloadUrl, expectedDigest);
+        } finally {
+            if (connection != null) connection.disconnect();
+        }
+    }
+
+    private long versionFromTag(String tag) {
+        Matcher matcher = Pattern.compile("(\\d+)$").matcher(tag == null ? "" : tag);
+        if (!matcher.find()) return -1;
+        try {
+            return Long.parseLong(matcher.group(1));
+        } catch (NumberFormatException ignored) {
+            return -1;
+        }
+    }
+
+    private long getInstalledVersionCode() {
+        try {
+            PackageInfo info = getPackageManager().getPackageInfo(getPackageName(), 0);
+            if (Build.VERSION.SDK_INT >= 28) return info.getLongVersionCode();
+            return info.versionCode;
+        } catch (Exception ignored) {
+            return 1;
+        }
+    }
+
+    private void showUpdateDialog(String releaseName, String downloadUrl, String expectedDigest) {
+        if (isFinishing() || isDestroyed()) return;
+        updatePromptShown = true;
+        new AlertDialog.Builder(this)
+                .setTitle("Жаңа нұсқа қолжетімді")
+                .setMessage(releaseName + " нұсқасы шықты. Рұқсат берсеңіз, APK тексеріліп жүктеледі де, Android қолданбаны өшірмей үстінен жаңартады.")
+                .setPositiveButton("Жаңартуға рұқсат беру", (dialog, which) -> downloadUpdate(downloadUrl, expectedDigest))
+                .setNegativeButton("Кейін", null)
+                .show();
+    }
+
+    private void downloadUpdate(String downloadUrl, String expectedDigest) {
+        downloadDialog = new ProgressDialog(this);
+        downloadDialog.setTitle("Жаңарту жүктелуде");
+        downloadDialog.setMessage("Жүктелуде...");
+        downloadDialog.setProgressStyle(ProgressDialog.STYLE_HORIZONTAL);
+        downloadDialog.setIndeterminate(true);
+        downloadDialog.setCancelable(false);
+        downloadDialog.show();
+
+        new Thread(() -> {
+            HttpURLConnection connection = null;
+            File partFile = new File(getCacheDir(), UPDATE_APK_PART_FILE_NAME);
+            updateApkFile = new File(getCacheDir(), UPDATE_APK_FILE_NAME);
+            try {
+                if (partFile.exists() && !partFile.delete()) {
+                    throw new IllegalStateException("Алдыңғы жаңарту файлын тазалау мүмкін болмады.");
+                }
+                URL url = new URL(downloadUrl);
+                connection = (HttpURLConnection) url.openConnection();
+                connection.setConnectTimeout(15000);
+                connection.setReadTimeout(30000);
+                connection.setRequestProperty("User-Agent", "ONAY-Demo-Android-Updater");
+                connection.connect();
 
                 int status = connection.getResponseCode();
                 if (status < 200 || status >= 300) {
