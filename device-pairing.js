@@ -12,7 +12,7 @@
   var mode='', scannerStream=null, scannerTimer=null, scannerOpening=false;
   var approvalPollTimer=null, approvalStatusTimer=null, receiverPollTimer=null, presenceTimer=null, autoPairBusy=false, authHookRetryTimer=null;
   var pairRequestInFlight=false, approvalActionInFlight=false, claimInFlight=false;
-  var registeredServerPhone='', presenceInFlight=false;
+  var registeredServerPhone='', presenceInFlight=false, remoteLoginPhone='', remoteLoginBusy=false;
   var currentApproval=null, receiverRequestId='', receiverPhone='', seenRequests={};
 
   function $(id){return document.getElementById(id);}
@@ -88,6 +88,11 @@
         rate_limited:'Тым көп әрекет. Біраздан кейін қайталаңыз.',
         invalid_device:'Құрылғы анықталмады. Қолданбаны қайта ашыңыз.',
         invalid_payload:'Синхрондау дерегі тым үлкен. Фото көлемі қысқартылып қайта көріңіз.',
+        invalid_login:'Кіру деректері қате.',
+        invalid_pin:'PIN-код қате. Қайта енгізіңіз.',
+        account_not_synced:'Аккаунт серверге әлі сақталмаған. Ескі телефоннан бір рет PIN арқылы кіріп көріңіз.',
+        account_snapshot_invalid:'Аккаунт деректерін қалпына келтіру мүмкін болмады.',
+        invalid_account_snapshot:'Аккаунт деректері тым үлкен немесе толық емес.',
         phone_not_registered:'Бұл нөмір серверде тіркелмеген.',
         owner_offline:'Нөмір иесі желіде емес. Кейін қайталаңыз.',
         device_not_owner:'Бұл құрылғы осы нөмірдің негізгі телефоны емес.',
@@ -136,6 +141,31 @@
       }
     };
   }
+  function localAccountForPhone(phone){
+    var digits=normalizePhone(phone);
+    if(digits.length<10)return null;
+    var accounts=parse(localStorage.getItem(AUTH_STORE_KEY))||{};
+    var account=accounts[digits]||null;
+    try{return account?JSON.parse(JSON.stringify(account)):null;}catch(_){return null;}
+  }
+  function snapshotPayload(phone){
+    var data=payload().data;
+    var account=data.account||localAccountForPhone(phone);
+    var digits=normalizePhone(phone||account&&account.phoneDigits);
+    if(account&&digits.length>=10)data.profile={phoneDigits:digits,displayName:account.profile&&account.profile.name||null};
+    data.account=account;
+    return data;
+  }
+  async function syncAccountSnapshot(){
+    var phone=accountPhone();
+    if(phone.length<10||!window.__onayDemoAccount)return false;
+    try{
+      var data=snapshotPayload(phone);
+      await request('/v1/account/snapshot',{phone:phone,deviceId:getDeviceId(),account:data.account,ledger:data.ledger,favorites:data.favorites});
+      return true;
+    }catch(_){return false;}
+  }
+  window.onaySyncAccountSnapshot=syncAccountSnapshot;
   function saveReceiverState(){
     try{sessionStorage.setItem(RECEIVER_STATE_KEY,JSON.stringify({requestId:receiverRequestId,phone:receiverPhone}));}catch(_){}
   }
@@ -327,7 +357,10 @@
     if(phone.length<10)return false;
     if(registeredServerPhone===phone)return true;
     try{
-      var result=await request('/v1/account/register',{phone:phone,deviceId:getDeviceId()});
+      var data=snapshotPayload(phone);
+      var body={phone:phone,deviceId:getDeviceId()};
+      if(data.account){body.account=data.account;body.ledger=data.ledger;body.favorites=data.favorites;}
+      var result=await request('/v1/account/register',body);
       if(result.owner===false){
         var ownerError=new Error('Бұл құрылғы осы нөмірдің негізгі телефоны емес.');
         ownerError.code='device_not_owner';
@@ -651,11 +684,13 @@
       autoPairBusy=true;
       request('/v1/account/status',{phone:digits,deviceId:getDeviceId()}).then(function(result){
         if(!result||result.registered!==true)return original.apply(this,callArgs);
-        // A local PIN is not enough after this phone has lost ownership.
-        // The current owner must approve a fresh pairing request every time.
-        if(result.owner===true)return original.apply(this,callArgs);
-        if(result.online===true)return requestPairingFromAuth(digits);
-        return showRegisteredOffline(digits);
+        var localAccount=localAccountForPhone(digits);
+        // A reinstall creates a new device id and has no local account. The
+        // server PIN restores the account and transfers ownership directly;
+        // the old phone is not asked for confirmation.
+        if(result.owner===true&&localAccount)return original.apply(this,callArgs);
+        remoteLoginPhone=digits;
+        if(typeof window.onayPrepareRemoteAccountLogin==='function')window.onayPrepareRemoteAccountLogin(digits);
       }.bind(this)).catch(function(){
         var error=$('auth-error');
         if(error)error.textContent='Серверге қосылу мүмкін болмады. Интернетті тексеріп, кейін қайталаңыз.';
@@ -663,6 +698,39 @@
     };
     wrapper.__onayPairWrapper=true;
     window.authSubmitPhone=wrapper;
+  }
+  function patchAuthLogin(){
+    if(typeof window.authLogin!=='function'||window.authLogin.__onayRemoteLoginWrapper)return;
+    var original=window.authLogin;
+    var wrapper=async function(){
+      var phone=normalizePhone(remoteLoginPhone);
+      if(phone.length<10)return original.apply(this,arguments);
+      if(remoteLoginBusy)return;
+      var input=$('auth-login-pin'),pin=String(input&&input.value||'');
+      if(!/^\d{4}$/.test(pin)){
+        if(typeof window.authSetError==='function')window.authSetError('4 таңбалы PIN-кодты енгізіңіз.');
+        return;
+      }
+      remoteLoginBusy=true;
+      try{
+        var result=await request('/v1/account/login',{phone:phone,deviceId:getDeviceId(),pin:pin});
+        if(!result.account)throw new Error('Аккаунт деректері табылмады.');
+        var accounts=parse(localStorage.getItem(AUTH_STORE_KEY))||{};
+        accounts[phone]=result.account;
+        localStorage.setItem(AUTH_STORE_KEY,JSON.stringify(accounts));
+        localStorage.setItem(AUTH_LAST_PHONE_KEY,phone);
+        sessionStorage.setItem(AUTH_PENDING_PHONE_KEY,phone);
+        if(result.ledger)localStorage.setItem(ledgerKeyFor(phone),JSON.stringify(result.ledger));
+        if(Array.isArray(result.favorites))localStorage.setItem(FAVORITES_KEY,JSON.stringify(result.favorites));
+        remoteLoginPhone='';registeredServerPhone='';
+        if(typeof window.authCompleteLogin==='function')window.authCompleteLogin(result.account);
+      }catch(error){
+        if(typeof window.authSetError==='function')window.authSetError(error.message||'Аккаунтты қалпына келтіру мүмкін болмады.');
+        if(typeof window.authRenderPinDots==='function')window.authRenderPinDots(true);
+      }finally{remoteLoginBusy=false;}
+    };
+    wrapper.__onayRemoteLoginWrapper=true;
+    window.authLogin=wrapper;
   }
   function patchAuthFinishRegistration(){
     if(typeof window.authFinishRegistration!=='function'||window.authFinishRegistration.__onayPairRegistrationWrapper)return;
@@ -681,11 +749,12 @@
   function watchAuthFlow(){
     var authContent=$('auth-content');
     if(authContent&&!authContent.__onayPairObserver){
-      var observer=new MutationObserver(function(){patchAuthSubmitPhone();patchAuthFinishRegistration();resumeReceiverRequest();});
+      var observer=new MutationObserver(function(){patchAuthSubmitPhone();patchAuthLogin();patchAuthFinishRegistration();resumeReceiverRequest();});
       observer.observe(authContent,{childList:true,subtree:true});
       authContent.__onayPairObserver=true;
     }
     patchAuthSubmitPhone();
+    patchAuthLogin();
     patchAuthFinishRegistration();
     resumeReceiverRequest();
   }
@@ -698,12 +767,12 @@
       root.insertAdjacentHTML('beforeend','<div class="pair-modal" hidden id="pair-modal" onclick="if(event.target===this)closeDevicePairModal()"><div class="pair-dialog" role="dialog" aria-modal="true"><button class="pair-close" type="button" onclick="closeDevicePairModal()">×</button><h3 id="pair-title">Телефонды синхрондау</h3><p id="pair-text"></p><div class="pair-approval-actions" hidden id="pair-approval-actions"><button class="pair-approve" id="pair-approve" type="button">Растау</button><button class="pair-reject" id="pair-reject" type="button">Бас тарту</button></div><div class="pair-code" hidden id="pair-code"></div><img class="pair-qr" hidden id="pair-qr" alt="ONAY синхрондау QR коды"/><video class="pair-scanner-video" hidden id="pair-scanner-video" playsinline muted></video><button class="pair-open-code" hidden id="pair-open-code" type="button">QR сканерлеу немесе код енгізу</button><input class="pair-input" hidden id="pair-input" maxlength="8" inputmode="numeric" type="tel" placeholder="00000000"/><button class="pair-scan" hidden id="pair-scan" type="button">QR сканерін ашу</button><button class="pair-submit" hidden id="pair-submit" type="button">Деректерді алу</button><p class="pair-status" id="pair-status" aria-live="polite"></p></div></div>');
     }
     watchAuthFlow();
-    if(!window.authSubmitPhone||!window.authSubmitPhone.__onayPairWrapper||!window.authFinishRegistration||!window.authFinishRegistration.__onayPairRegistrationWrapper){
+    if(!window.authSubmitPhone||!window.authSubmitPhone.__onayPairWrapper||!window.authLogin||!window.authLogin.__onayRemoteLoginWrapper||!window.authFinishRegistration||!window.authFinishRegistration.__onayPairRegistrationWrapper){
       var retries=0;
       authHookRetryTimer=setInterval(function(){
         watchAuthFlow();
         retries++;
-        if((window.authSubmitPhone&&window.authSubmitPhone.__onayPairWrapper&&window.authFinishRegistration&&window.authFinishRegistration.__onayPairRegistrationWrapper)||retries>=40){
+        if((window.authSubmitPhone&&window.authSubmitPhone.__onayPairWrapper&&window.authLogin&&window.authLogin.__onayRemoteLoginWrapper&&window.authFinishRegistration&&window.authFinishRegistration.__onayPairRegistrationWrapper)||retries>=40){
           clearInterval(authHookRetryTimer);
           authHookRetryTimer=null;
         }

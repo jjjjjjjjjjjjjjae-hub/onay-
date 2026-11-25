@@ -35,6 +35,17 @@ CREATE TABLE IF NOT EXISTS registered_phones (
   updated_at INTEGER NOT NULL
 );
 
+-- Server copy used to restore the same demo account after the app/browser
+-- storage is removed. The PIN hash is stored, never the plaintext PIN.
+CREATE TABLE IF NOT EXISTS account_snapshots (
+  phone_hash TEXT PRIMARY KEY,
+  account_json TEXT NOT NULL CHECK (json_valid(account_json)),
+  ledger_json TEXT NOT NULL CHECK (json_valid(ledger_json)),
+  favorites_json TEXT NOT NULL CHECK (json_valid(favorites_json)),
+  created_at INTEGER NOT NULL,
+  updated_at INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS device_pairings (
   code_hash TEXT PRIMARY KEY,
   phone_hash TEXT NOT NULL,
@@ -87,3 +98,4 @@ CREATE TABLE IF NOT EXISTS pair_presence (
 CREATE INDEX IF NOT EXISTS idx_pair_presence_expires_at ON pair_presence(expires_at);
 CREATE INDEX IF NOT EXISTS idx_pair_rate_limits_window_start ON pair_rate_limits(window_start);
 CREATE INDEX IF NOT EXISTS idx_registered_phones_owner_device_id ON registered_phones(owner_device_id);
+CREATE INDEX IF NOT EXISTS idx_account_snapshots_updated_at ON account_snapshots(updated_at);
