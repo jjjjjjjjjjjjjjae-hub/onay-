@@ -69,6 +69,12 @@ function base64Bytes(value) {
   return bytes;
 }
 
+function base64Value(bytes) {
+  let raw = "";
+  for (const byte of bytes) raw += String.fromCharCode(byte);
+  return btoa(raw);
+}
+
 function bytesEqual(left, right) {
   if (!left || !right || left.length !== right.length) return false;
   let difference = 0;
@@ -105,8 +111,7 @@ function accountSnapshot(body, phone) {
   if (
     !account.pinSalt
     || !account.pinHash
-    || !account.serverPinHash
-    || Number(account.serverPinIterations) !== PIN_HASH_ITERATIONS
+    || (account.serverPinHash && Number(account.serverPinIterations) !== PIN_HASH_ITERATIONS)
   ) return null;
   const profile = usableProfile(account.profile)
     ? account.profile
@@ -130,6 +135,28 @@ function accountSnapshot(body, phone) {
     || accountJson.length + profileJson.length + ledgerJson.length + favoritesJson.length > MAX_ENCRYPTED_PAYLOAD_LENGTH
   ) return null;
   return { accountJson, profileJson, ledgerJson, favoritesJson };
+}
+
+async function accountSnapshotWithPin(body, phone) {
+  const account = body?.account;
+  if (
+    account
+    && !account.serverPinHash
+    && /^d{4}$/.test(String(body?.pin || ""))
+    && account.pinSalt
+  ) {
+    const serverPinHash = await derivePinHash(String(body.pin), base64Bytes(account.pinSalt));
+    body = {
+      ...body,
+      account: {
+        ...account,
+        serverPinSalt: account.pinSalt,
+        serverPinHash: base64Value(serverPinHash),
+        serverPinIterations: PIN_HASH_ITERATIONS,
+      },
+    };
+  }
+  return accountSnapshot(body, phone);
 }
 
 async function upsertAccountSnapshot(env, phoneHash, snapshot, now) {
@@ -246,7 +273,7 @@ async function accountSnapshotSave(request, env) {
   const registration = await phoneRegistrationStatus(env, phone);
   if (!registration.registered) return json({ ok: false, error: "phone_not_registered" }, 404);
   if (registration.ownerDeviceId !== deviceId) return json({ ok: false, error: "device_not_owner" }, 403);
-  const snapshot = accountSnapshot(body, phone);
+  const snapshot = await accountSnapshotWithPin(body, phone);
   if (!snapshot) return json({ ok: false, error: "invalid_account_snapshot" }, 400);
   await upsertAccountSnapshot(env, registration.phoneHash, snapshot, nowSeconds());
   return json({ ok: true, saved: true });

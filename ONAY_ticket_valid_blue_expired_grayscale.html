@@ -19022,7 +19022,7 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
         else authSetError('Аккаунт табылмады. PIN-код арқылы қайта кіріңіз.');
       }else if(message)authSetError(message);
     }
-    function authCompleteLogin(account){
+    function authCompleteLogin(account,serverPin=''){
       authRememberLastPhone(authPendingPhone);
       if(authAfterLogoutPin){
         // Мәзірден шыққаннан кейін PIN немесе биометрия расталса, тіркелу бетіне өтеміз.
@@ -19031,7 +19031,7 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
         authRender('phone');return;
       }
       authApplyAccount(account);unlockAppPin();
-      try{if(typeof window.onaySyncAccountSnapshot==='function')window.onaySyncAccountSnapshot();}catch(_){ }
+      try{if(typeof window.onaySyncAccountSnapshot==='function')window.onaySyncAccountSnapshot(serverPin);}catch(_){ }
     }
     async function authLogin(){
       if(authBusy)return;const pin=String(el('auth-login-pin')?.value||'');if(!/^\d{4}$/.test(pin)){authSetError('4 таңбалы PIN-кодты енгізіңіз.');return;}
@@ -19051,7 +19051,7 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
           account.serverPinIterations=100000;
           const accounts=authLoadAccounts();accounts[authPendingPhone]=account;authSaveAccounts(accounts);authRememberLastProfile(authPendingPhone,account.profile);
         }catch(_){ }
-        authCompleteLogin(account);
+        authCompleteLogin(account,pin);
       }catch(error){authSetError(error?.message||'Аккаунтқа кіру мүмкін болмады.');}
       finally{authBusy=false;}
     }
