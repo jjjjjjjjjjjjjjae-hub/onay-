@@ -16,11 +16,11 @@ def appVersionNameValue = (project.findProperty('appVersionName') ?: '1.0-demo')
 def signingStorePath = (project.findProperty('signingStoreFile') ?: "${rootProject.projectDir}/missing-release-key.jks").toString()
 
 android {
-    namespace 'kz.onay.demo'
+    namespace 'kz.onay'
     compileSdk 35
 
     defaultConfig {
-        applicationId 'kz.onay.demo'
+        applicationId 'kz.onay'
         minSdk 24
         targetSdk 35
         versionCode appVersionCodeValue
