@@ -135,10 +135,10 @@
 #page-qr.hidden {display:none!important;}
 .qr-head {height:58px;flex-shrink:0;display:flex;align-items:center;gap:22px;
   width:100%;max-width:100%;overflow:hidden;padding:0 max(14px,env(safe-area-inset-right)) 0 max(14px,env(safe-area-inset-left));
-  background:#fff;position:relative;z-index:30;pointer-events:auto;touch-action:manipulation;transform:translateY(14px);}
-.qr-back{display:grid;place-items:center;flex:0 0 34px;height:43px;width:34px;font-size:23px;color:#111;}
+  background:#fff;position:relative;z-index:30;pointer-events:auto;touch-action:manipulation;transform:translateY(20px);}
+.qr-back{display:grid;place-items:center;flex:0 0 34px;height:43px;width:34px;font-size:23px;color:#111;cursor:pointer;touch-action:manipulation;}
 .qr-head h2{min-width:0;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:17px;font-weight:800;color:#121212;margin:0;}
-.qr-tabs {height:54px;flex-shrink:0;display:flex;width:100%;max-width:100%;overflow:hidden;background:#fff;border-bottom:1px solid #eee;position:relative;z-index:30;pointer-events:auto;touch-action:manipulation;transform:translateY(14px);}
+.qr-tabs {height:54px;flex-shrink:0;display:flex;width:100%;max-width:100%;overflow:hidden;background:#fff;border-bottom:1px solid #eee;position:relative;z-index:30;pointer-events:auto;touch-action:manipulation;transform:translateY(20px);}
 .qr-tab{position:relative;width:50%;border:0;background:#fff;color:#747474;font-size:13px;
   min-width:0;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:0 max(10px,env(safe-area-inset-right)) 0 max(10px,env(safe-area-inset-left));touch-action:manipulation;}
 .qr-tab span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500;}
@@ -166,10 +166,10 @@
 .qr-camera-status p{font-size:12px;line-height:1.5;white-space:pre-line;margin:0 0 10px;}
 .qr-camera-status button{border:0;background:#ffda00;color:#111;font-size:13px;font-weight:700;
  border-radius:999px;padding:11px 18px;width:100%;margin-top:8px;}
-.qr-scan-instructions{position:absolute;top:clamp(31px,5.4vh,61px);left:14px;right:14px;
+.qr-scan-instructions{position:absolute;top:clamp(44px,7vh,80px);left:14px;right:14px;
  display:flex;justify-content:center;align-items:flex-start;gap:12px;color:#fff;text-align:center;}
 .qr-flash{position:absolute;left:9px;top:0;border:0;background:transparent;color:#fff;
- width:43px;height:43px;font-size:22px;}
+  display:grid;place-items:center;width:48px;height:48px;font-size:22px;cursor:pointer;pointer-events:auto;touch-action:manipulation;}
 .qr-flash.off{opacity:.85;}
 .qr-help-text{max-width:260px;margin:8px auto 0;font-size:11px;line-height:1.35;font-weight:500;}
 .qr-scan-square{position:absolute;width:min(72vw,325px);height:min(72vw,325px);
@@ -17504,12 +17504,15 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
         try {
           stream=await navigator.mediaDevices.getUserMedia({
             audio:false,
-            video:{facingMode:{ideal:'environment'},width:{ideal:1280},height:{ideal:720}}
+            video:{facingMode:{exact:'environment'},width:{ideal:1280},height:{ideal:720}}
           });
         } catch (e) {
           // Кейбір телефондарда facingMode / өлшемге шектеу жасалады.
           if (!['OverconstrainedError','NotFoundError'].includes(e.name)) throw e;
-          stream=await navigator.mediaDevices.getUserMedia({video:true,audio:false});
+          stream=await navigator.mediaDevices.getUserMedia({
+            audio:false,
+            video:{facingMode:{ideal:'environment'},width:{ideal:1280},height:{ideal:720}}
+          });
         }
         if (!cameraTabIsOpen() || id !== qrCameraRequestId) {
           stream.getTracks().forEach(t=>t.stop()); return;
@@ -17568,12 +17571,17 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
     async function toggleQrTorch() {
       if(qrTorchBusy)return;
       const track=qrStream?.getVideoTracks()?.[0];
-      const caps=track?.getCapabilities?.();
-      if(!track || !caps?.torch){showToast('Бұл құрылғыда жарқыл қолжетімсіз');return;}
+      if(!track){showToast('Камера әлі іске қосылған жоқ');return;}
       const next=!qrTorchOn,request=++qrTorchRequestId;
       qrTorchBusy=true;updateQrTorchButton();
       try {
-        await track.applyConstraints({advanced:[{torch:next}]});
+        try {
+          await track.applyConstraints({advanced:[{torch:next}]});
+        } catch (firstError) {
+          // Кей WebView нұсқалары torch-ты advanced емес, тікелей constraint
+          // ретінде ғана қабылдайды.
+          await track.applyConstraints({torch:next});
+        }
         if(request!==qrTorchRequestId)return;
         const actual=track.getSettings?.().torch;
         qrTorchOn=typeof actual==='boolean'?actual:next;
