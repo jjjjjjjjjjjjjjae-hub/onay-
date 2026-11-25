@@ -82,9 +82,11 @@
         request_not_pending:'Бұл сұрау енді белсенді емес.',
         request_expired:'Растау уақыты өтіп кетті.',
         request_not_approved_or_expired:'Бірінші телефон әлі растаған жоқ немесе кодтың мерзімі өтті.',
+        request_stale:'Бұл растау ескірді. Жаңа сұрау жіберіңіз.',
         invalid_code:'8 таңбалы код қате.',
         code_already_claimed:'Бұл код бұрын қолданылған.',
         rate_limited:'Тым көп әрекет. Біраздан кейін қайталаңыз.',
+        invalid_device:'Құрылғы анықталмады. Қолданбаны қайта ашыңыз.',
         invalid_payload:'Синхрондау дерегі тым үлкен. Фото көлемі қысқартылып қайта көріңіз.',
         phone_not_registered:'Бұл нөмір серверде тіркелмеген.',
         owner_offline:'Нөмір иесі желіде емес. Кейін қайталаңыз.',
@@ -313,7 +315,7 @@
   async function pollPendingApproval(){
     if(!isApproverReady()||currentApproval||mode==='approval'||mode==='sender')return;
     try{
-      var result=await request('/v1/pair/pending',{phone:accountPhone()});
+      var result=await request('/v1/pair/pending',{phone:accountPhone(),deviceId:getDeviceId()});
       if(result.pending&&result.requestId&&!seenRequests[result.requestId]){
         seenRequests[result.requestId]=true;
         openApproval(result);
@@ -354,6 +356,12 @@
     }
     finally{presenceInFlight=false;}
   }
+  function releaseAccountPresence(){
+    var phone=accountPhone();
+    registeredServerPhone='';
+    if(phone.length<10)return;
+    request('/v1/account/logout',{phone:phone,deviceId:getDeviceId()}).catch(function(){});
+  }
   function startApprovalPolling(){
     if(approvalPollTimer)return;
     approvalPollTimer=setInterval(pollPendingApproval,2500);
@@ -380,7 +388,7 @@
     approvalActionInFlight=true;
     setBusy(true);
     try{
-      await request('/v1/pair/reject',{requestId:currentApproval.requestId,phone:accountPhone()});
+      await request('/v1/pair/reject',{requestId:currentApproval.requestId,phone:accountPhone(),deviceId:getDeviceId()});
       status('Сұрау қабылданбады.');
       setTimeout(hideModal,500);
     }catch(error){status(error.message,true);setBusy(false);}
@@ -402,6 +410,7 @@
       var result=await request('/v1/pair/approve',{
         requestId:currentApproval.requestId,
         phone:accountPhone(),
+        deviceId:getDeviceId(),
         pairCode:code,
         encryptedPayload:encryptedPayload
       });
@@ -412,7 +421,7 @@
       $('pair-qr').src=qrUrl('ONAYPAIRREQ:'+currentApproval.requestId+':'+(result.code||code));
       $('pair-qr').hidden=false;
       $('pair-title').textContent='Дерек жіберуге дайын';
-      $('pair-text').textContent='Алыста болса 8 таңбалы кодты, жақын болса QR-ды екінші телефонмен қолданыңыз. Бірінші телефон ашық күйінде қалады.';
+      $('pair-text').textContent='Алыста болса 8 таңбалы кодты, жақын болса QR-ды екінші телефонмен қолданыңыз. Екінші телефон кіргенде бұл телефон автоматты түрде шығады.';
       status('Код 10 минут жарамды.');
       setBusy(false);
       clearApprovalStatusPolling();
@@ -426,7 +435,11 @@
       var result=await request('/v1/pair/status',{requestId:currentApproval.requestId});
       if(result.status==='claimed'){
         clearApprovalStatusPolling();
-        status('Екінші телефон деректерді қабылдады. Бірінші телефонда аккаунт ашық қалды.');
+        if(typeof window.onayForceLogout==='function'){
+          window.onayForceLogout('Екінші телефон кірді. Бұл телефон аккаунттан шығарылды. Кіру үшін жаңа растау қажет.');
+        }else{
+          status('Екінші телефон кірді. Бұл телефон аккаунттан шығарылады.');
+        }
       }else if(result.status==='expired'||result.status==='rejected'){
         clearApprovalStatusPolling();
         status('Сұрау аяқталды.',true);
@@ -470,6 +483,7 @@
       pairRequestInFlight=false;
     }
   }
+  window.onayPairingLogout=releaseAccountPresence;
   function showRegisteredOffline(phone){
     stopScanner();
     clearReceiverPolling();
@@ -620,9 +634,6 @@
       var input=$('auth-phone-input');
       var digits=normalizePhone(input&&input.value);
       if(digits.length<10||digits.length>15)return original.apply(this,callArgs);
-      var accounts=parse(localStorage.getItem(AUTH_STORE_KEY))||{};
-      var localAccount=accounts[digits];
-      if(localAccount&&localAccount.pinHash&&localAccount.profile)return original.apply(this,callArgs);
       if((mode==='requester'||mode==='receiver')&&normalizePhone(receiverPhone)===digits){
         if(mode==='receiver'&&typeof window.openQrPairingPage==='function')window.openQrPairingPage();
         else showModal();
@@ -630,8 +641,11 @@
       }
       if(autoPairBusy)return;
       autoPairBusy=true;
-      request('/v1/account/status',{phone:digits}).then(function(result){
+      request('/v1/account/status',{phone:digits,deviceId:getDeviceId()}).then(function(result){
         if(!result||result.registered!==true)return original.apply(this,callArgs);
+        // A local PIN is not enough after this phone has lost ownership.
+        // The current owner must approve a fresh pairing request every time.
+        if(result.owner===true)return original.apply(this,callArgs);
         if(result.online===true)return requestPairingFromAuth(digits);
         return showRegisteredOffline(digits);
       }.bind(this)).catch(function(){

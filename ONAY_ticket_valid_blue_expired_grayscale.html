@@ -3077,6 +3077,96 @@ html,body{height:100%;min-height:100%;overflow:hidden;}
 }
 </style>
 
+<style id="responsive-navigation-stable">
+/* Navigation dimensions are derived from the app viewport width, not device
+   pixel density or a single reference screenshot. */
+#page-main,#page-routes,#page-menu,#page-life{
+  --nav-h:clamp(64px,16.6cqw,70px);
+  --nav-bottom:max(6px,env(safe-area-inset-bottom));
+  box-sizing:border-box;
+}
+#page-routes{container-type:inline-size;}
+#page-main .onay-bottom-bar{
+  bottom:var(--nav-bottom)!important;
+  height:var(--nav-h)!important;
+  min-height:var(--nav-h)!important;
+  padding:clamp(3px,1cqw,5px) clamp(6px,1.8cqw,9px) clamp(3px,1cqw,5px)!important;
+  border-radius:clamp(18px,5.4cqw,24px)!important;
+}
+#page-main .onay-bottom-action{
+  height:calc(var(--nav-h) - clamp(8px,2cqw,10px))!important;
+  min-height:calc(var(--nav-h) - clamp(8px,2cqw,10px))!important;
+  gap:clamp(2px,.8cqw,4px)!important;
+  font-size:clamp(10px,2.4cqw,12px)!important;
+}
+#page-main .onay-bottom-action>svg{width:clamp(24px,6cqw,27px)!important;height:clamp(24px,6cqw,27px)!important;}
+#page-main .onay-bottom-action span:last-child{font-size:clamp(10px,2.4cqw,12px)!important;line-height:1.1!important;}
+#page-main .onay-nav-card-icon{width:clamp(27px,7cqw,31px)!important;height:clamp(27px,7cqw,31px)!important;}
+#page-main .onay-nav-card-icon svg{width:clamp(21px,5.5cqw,24px)!important;height:clamp(21px,5.5cqw,24px)!important;}
+#page-main .onay-menu-avatar{width:clamp(28px,7.2cqw,31px)!important;height:clamp(28px,7.2cqw,31px)!important;}
+#page-main .onay-menu-avatar svg{width:100%!important;height:100%!important;}
+#page-main .onay-nav-qr-holder{height:calc(var(--nav-h) + clamp(0px,1cqw,4px))!important;}
+#page-main .onay-nav-qr{
+  top:clamp(-31px,-7.6cqw,-27px)!important;
+  width:clamp(58px,15cqw,64px)!important;
+  height:clamp(58px,15cqw,64px)!important;
+}
+#page-main .onay-nav-qr svg{width:clamp(29px,7.5cqw,32px)!important;height:clamp(29px,7.5cqw,32px)!important;}
+#page-main .cards-peek-sheet{bottom:calc(var(--nav-h) + var(--nav-bottom))!important;}
+#my-cards-panel{padding-bottom:calc(var(--nav-h) + var(--nav-bottom) + clamp(78px,24cqw,98px))!important;}
+
+#page-routes .route-citybar{height:clamp(48px,12cqw,56px)!important;padding:0 clamp(9px,3.2cqw,14px)!important;gap:clamp(6px,2.2cqw,10px)!important;}
+#page-routes .route-location-btn{height:100%!important;gap:clamp(10px,3.5cqw,16px)!important;font-size:clamp(12px,3.2cqw,14px)!important;}
+#page-routes .route-menu-btn{height:clamp(40px,10.6cqw,44px)!important;min-width:clamp(92px,27cqw,110px)!important;gap:clamp(7px,3.2cqw,14px)!important;font-size:clamp(11px,3.1cqw,13px)!important;}
+#page-routes .route-reload{height:clamp(40px,10.6cqw,44px)!important;width:clamp(38px,10.5cqw,44px)!important;}
+#page-routes .route-main-tabs{height:clamp(45px,12.8cqw,53px)!important;}
+#page-routes .route-main-tab{font-size:clamp(12px,3.4cqw,14px)!important;}
+#page-routes .route-search-box{height:clamp(41px,10.8cqw,45px)!important;margin:clamp(10px,3.5cqw,15px) clamp(12px,3.8cqw,16px) clamp(8px,3.2cqw,14px)!important;padding:0 clamp(12px,4.5cqw,19px)!important;}
+#page-routes .route-search-box input{font-size:clamp(12px,3.4cqw,14px)!important;}
+#page-routes .route-category-list{height:clamp(44px,12.5cqw,51px)!important;}
+#page-routes .route-category{gap:clamp(5px,2.4cqw,10px)!important;font-size:clamp(10px,2.9cqw,12px)!important;padding:0 clamp(2px,1cqw,4px)!important;}
+#page-routes .route-category svg{width:clamp(16px,4.6cqw,19px)!important;height:clamp(16px,4.6cqw,19px)!important;}
+#page-routes .route-catalog-scroll{padding:clamp(16px,5.5cqw,23px) clamp(12px,5.4cqw,22px) calc(var(--nav-h) + var(--nav-bottom) + clamp(38px,12cqw,50px))!important;}
+#page-routes .route-number-grid{gap:clamp(8px,2.7cqw,11px) clamp(11px,4.6cqw,19px)!important;}
+#page-routes .route-tile{height:clamp(54px,15.3cqw,64px)!important;font-size:clamp(14px,3.8cqw,16px)!important;}
+#page-routes .route-favorites{bottom:clamp(12px,4.5cqw,18px)!important;padding:clamp(20px,7cqw,28px) clamp(12px,3.8cqw,16px) clamp(7px,2.4cqw,10px)!important;}
+#page-routes .route-fav-chip{height:clamp(32px,9cqw,36px)!important;border-radius:clamp(10px,3.3cqw,13px)!important;gap:clamp(6px,2.2cqw,9px)!important;font-size:clamp(11px,3.2cqw,13px)!important;padding:0 clamp(9px,3.7cqw,15px)!important;}
+#page-routes .route-fav-chip.bookmark{width:clamp(36px,10cqw,41px)!important;padding:0!important;}
+#page-routes .route-bottom-nav{
+  height:var(--nav-h)!important;
+  min-height:var(--nav-h)!important;
+  margin:0 clamp(6px,2cqw,9px) var(--nav-bottom)!important;
+  padding:clamp(3px,1cqw,5px) clamp(6px,1.8cqw,9px) clamp(3px,1cqw,5px)!important;
+  border-radius:clamp(18px,5.4cqw,24px)!important;
+}
+#page-routes .route-bottom-button{height:calc(var(--nav-h) - clamp(8px,2cqw,10px))!important;min-height:0!important;gap:clamp(2px,.8cqw,4px)!important;font-size:clamp(10px,2.4cqw,12px)!important;}
+#page-routes .route-bottom-button svg{width:clamp(22px,6cqw,26px)!important;height:clamp(22px,6cqw,26px)!important;}
+#page-routes .route-bottom-button .route-selected-icon{width:clamp(27px,7cqw,31px)!important;height:clamp(27px,7cqw,31px)!important;}
+#page-routes .route-bottom-button .route-selected-icon svg{width:clamp(19px,5.3cqw,22px)!important;height:clamp(19px,5.3cqw,22px)!important;}
+#page-routes .route-qr-holder{height:calc(var(--nav-h) + clamp(0px,1cqw,4px))!important;}
+#page-routes .route-qr-button{top:clamp(-31px,-7.6cqw,-27px)!important;width:clamp(58px,15cqw,64px)!important;height:clamp(58px,15cqw,64px)!important;}
+#page-routes .route-qr-button svg{width:clamp(29px,7.5cqw,32px)!important;height:clamp(29px,7.5cqw,32px)!important;}
+#page-routes .route-number-grid.list-view .route-tile{height:clamp(46px,12.5cqw,52px)!important;padding-left:clamp(14px,5.5cqw,21px)!important;}
+
+#page-menu .menu-bottom-bar,#page-life .life-bottom-bar{
+  height:var(--nav-h)!important;
+  min-height:var(--nav-h)!important;
+  margin-bottom:var(--nav-bottom)!important;
+  padding:clamp(3px,1cqw,5px) clamp(6px,1.8cqw,9px) clamp(3px,1cqw,5px)!important;
+  border-radius:clamp(18px,5.4cqw,24px)!important;
+}
+#page-menu .onay-bottom-action,#page-life .onay-bottom-action{height:calc(var(--nav-h) - clamp(8px,2cqw,10px))!important;min-height:0!important;gap:clamp(2px,.8cqw,4px)!important;font-size:clamp(10px,2.4cqw,12px)!important;}
+#page-menu .onay-bottom-action>svg,#page-life .onay-bottom-action>svg{width:clamp(24px,6cqw,27px)!important;height:clamp(24px,6cqw,27px)!important;}
+#page-menu .onay-bottom-action span:last-child,#page-life .onay-bottom-action span:last-child{font-size:clamp(10px,2.4cqw,12px)!important;line-height:1.1!important;}
+#page-menu .onay-nav-card-icon,#page-life .onay-nav-card-icon{width:clamp(27px,7cqw,31px)!important;height:clamp(27px,7cqw,31px)!important;}
+#page-menu .onay-nav-card-icon svg,#page-life .onay-nav-card-icon svg{width:clamp(21px,5.5cqw,24px)!important;height:clamp(21px,5.5cqw,24px)!important;}
+#page-menu .onay-menu-avatar,#page-life .onay-menu-avatar{width:clamp(28px,7.2cqw,31px)!important;height:clamp(28px,7.2cqw,31px)!important;}
+#page-menu .onay-nav-qr-holder,#page-life .onay-nav-qr-holder{height:calc(var(--nav-h) + clamp(0px,1cqw,4px))!important;}
+#page-menu .onay-nav-qr,#page-life .onay-nav-qr{top:clamp(-31px,-7.6cqw,-27px)!important;width:clamp(58px,15cqw,64px)!important;height:clamp(58px,15cqw,64px)!important;}
+#page-menu .onay-nav-qr svg,#page-life .onay-nav-qr svg{width:clamp(29px,7.5cqw,32px)!important;height:clamp(29px,7.5cqw,32px)!important;}
+#page-menu .menu-content,#page-life .life-content{padding-bottom:calc(8cqw + var(--nav-h))!important;}
+</style>
+
 </head>
 <body class="bg-slate-900 flex justify-center items-center min-h-screen p-0 sm:p-4">
 <div class="app-pin-locked w-full max-w-[410px] bg-[#f8f9fa] h-[100dvh] sm:h-[844px] sm:rounded-[40px] shadow-2xl relative flex flex-col overflow-hidden border-0 sm:border-8 sm:border-slate-800" id="onay-app-root">
@@ -18771,6 +18861,7 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
       const bell=el('cards-top-nav')?.querySelector('.cards-bell');bell?.focus({preventScroll:true});
     }
     function lockAppPin(){
+      try{if(typeof window.onayPairingLogout==='function')window.onayPairingLogout();}catch(_){ }
       authStopCamera();window.__onayDemoAccount=null;activeTrialPhoneDigits='';trialLedger=loadTrialLedger();trialProfile={...EMPTY_TRIAL_PROFILE};
       syncTrialBalances();renderTrialTickets();renderTrialHistory();renderTrialNotifications();renderTrialHolder();refreshOnayCardDetails();
       el('onay-app-root').classList.add('app-pin-locked');el('app-pin-gate').hidden=false;authDraftPhoto='';authDraftPhotoWidth=0;authDraftPhotoHeight=0;authUploadedPhotoPath='';authDraftProfile=null;authShowStartupScreen();
