@@ -1,5 +1,16 @@
 plugins { id 'com.android.application' }
 
+// AndroidX Biometric and WebKit can request different Kotlin stdlib module
+// versions. Keep the JDK7/JDK8 compatibility modules aligned so AGP does not
+// package duplicate Kotlin classes into the APK.
+configurations.configureEach {
+    resolutionStrategy.eachDependency { details ->
+        if (details.requested.group == 'org.jetbrains.kotlin') {
+            details.useVersion '1.8.22'
+        }
+    }
+}
+
 def appVersionCodeValue = (project.findProperty('appVersionCode') ?: '1').toString().toInteger()
 def appVersionNameValue = (project.findProperty('appVersionName') ?: '1.0-demo').toString()
 def signingStorePath = (project.findProperty('signingStoreFile') ?: "${rootProject.projectDir}/missing-release-key.jks").toString()
