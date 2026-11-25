@@ -34,4 +34,4 @@ The workflow:
 
 The workflow uses the same number for Android `versionCode` and the `v1.0.N` release tag. This is required by the in-app updater.
 
-The first permanent-key build must replace any earlier debug-signed build: uninstall the debug build once, then install the signed APK. Later releases must keep the same `applicationId` (`kz.onay.demo`) and the same keystore, and must have a higher `versionCode`. Android still requires the user to confirm each installation.
+The first permanent-key build must replace any earlier debug-signed build: uninstall the debug build once, then install the signed APK. Later releases must keep the same `applicationId` (`kz.onay`) and the same keystore, and must have a higher `versionCode`. Android still requires the user to confirm each installation.

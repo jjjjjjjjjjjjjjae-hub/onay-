@@ -1,4 +1,4 @@
-package kz.onay.demo;
+package kz.onay;
 
 import android.Manifest;
 import android.app.AlertDialog;
@@ -292,7 +292,9 @@ public class MainActivity extends FragmentActivity {
     }
 
     private void setSplashSystemBars(boolean splashVisible) {
-        int barColor = splashVisible ? Color.rgb(255, 216, 0) : Color.WHITE;
+        // Keep the system/status bars white. The supplied yellow image is
+        // shown only inside the branded content area below the system UI.
+        int barColor = Color.WHITE;
         getWindow().setStatusBarColor(barColor);
         getWindow().setNavigationBarColor(barColor);
         int flags = View.SYSTEM_UI_FLAG_LAYOUT_STABLE;
