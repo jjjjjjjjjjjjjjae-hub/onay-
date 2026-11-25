@@ -65,6 +65,11 @@ public class MainActivity extends FragmentActivity {
     private static final String RELEASE_LATEST_APK_URL =
             "https://github.com/jjjjjjjjjjjjjjae-hub/onay-/releases/latest/download/ONAY-Demo.apk";
     private static final String APK_ASSET_NAME = "ONAY-Demo.apk";
+    // Releases below this version are blocked until the user installs the
+    // current signed APK. This prevents old local-account behavior from
+    // continuing after the account reset migration.
+    private static final long MINIMUM_SUPPORTED_VERSION_CODE = 80L;
+    private static final String MINIMUM_SUPPORTED_VERSION_NAME = "1.0.80";
     private static final int CAMERA_PERMISSION_REQUEST = 702;
     private static final int FILE_CHOOSER_REQUEST = 703;
     private static final String APP_ASSET_HOST = "appassets.androidplatform.net";
@@ -729,17 +734,34 @@ public class MainActivity extends FragmentActivity {
                 // tag and does not require the API quota.
                 UpdateInfo update = fetchLatestReleaseRedirect();
                 if (update == null) update = fetchLatestReleaseFromApi();
-                if (update == null) return;
+                if (update == null) {
+                    if (getInstalledVersionCode() < MINIMUM_SUPPORTED_VERSION_CODE) {
+                        mainHandler.post(this::showMandatoryUpdateUnavailable);
+                    }
+                    return;
+                }
 
-                long remoteVersion = versionFromTag(update.tag);
                 long currentVersion = getInstalledVersionCode();
                 completed = true;
+                long remoteVersion = versionFromTag(update.tag);
+                if (currentVersion < MINIMUM_SUPPORTED_VERSION_CODE) {
+                    if (remoteVersion < MINIMUM_SUPPORTED_VERSION_CODE) {
+                        mainHandler.post(this::showMandatoryUpdateUnavailable);
+                        return;
+                    }
+                    final UpdateInfo latest = update;
+                    mainHandler.post(() -> showUpdateDialog(
+                            latest.releaseName, latest.downloadUrl, latest.expectedDigest, true));
+                    return;
+                }
                 if (remoteVersion <= currentVersion) return;
                 final UpdateInfo latest = update;
                 mainHandler.post(() -> showUpdateDialog(
-                        latest.releaseName, latest.downloadUrl, latest.expectedDigest));
+                        latest.releaseName, latest.downloadUrl, latest.expectedDigest, false));
             } catch (Exception ignored) {
-                // Update checks are optional; the app remains usable offline.
+                if (getInstalledVersionCode() < MINIMUM_SUPPORTED_VERSION_CODE) {
+                    mainHandler.post(this::showMandatoryUpdateUnavailable);
+                }
             } finally {
                 updateCheckFinished = completed;
                 updateCheckInFlight = false;
@@ -843,15 +865,35 @@ public class MainActivity extends FragmentActivity {
         }
     }
 
-    private void showUpdateDialog(String releaseName, String downloadUrl, String expectedDigest) {
-        if (isFinishing() || isDestroyed()) return;
+    private void showMandatoryUpdateUnavailable() {
+        if (isFinishing() || isDestroyed() || updatePromptShown) return;
         updatePromptShown = true;
         new AlertDialog.Builder(this)
-                .setTitle("Жаңа нұсқа қолжетімді")
-                .setMessage(releaseName + " нұсқасы шықты. Рұқсат берсеңіз, APK тексеріліп жүктеледі де, Android қолданбаны өшірмей үстінен жаңартады.")
-                .setPositiveButton("Жаңартуға рұқсат беру", (dialog, which) -> downloadUpdate(downloadUrl, expectedDigest))
-                .setNegativeButton("Кейін", null)
+                .setTitle("Жаңарту міндетті")
+                .setMessage("Қолданбаны жалғастыру үшін " + MINIMUM_SUPPORTED_VERSION_NAME
+                        + " нұсқасын орнату керек. Интернетті қосып, қайта тексеріңіз.")
+                .setPositiveButton("Қайта тексеру", (dialog, which) -> {
+                    updatePromptShown = false;
+                    updateCheckFinished = false;
+                    scheduleUpdateCheck();
+                })
+                .setCancelable(false)
                 .show();
+    }
+
+    private void showUpdateDialog(String releaseName, String downloadUrl,
+                                  String expectedDigest, boolean mandatory) {
+        if (isFinishing() || isDestroyed()) return;
+        updatePromptShown = true;
+        AlertDialog.Builder builder = new AlertDialog.Builder(this)
+                .setTitle(mandatory ? "Жаңарту міндетті" : "Жаңа нұсқа қолжетімді")
+                .setMessage(mandatory
+                        ? releaseName + " нұсқасын орнатпай қолданбаны пайдалану мүмкін емес."
+                        : releaseName + " нұсқасы шықты. APK тексеріліп, Android қолданбаны өшірмей үстінен жаңартады.")
+                .setPositiveButton("Жаңартуға рұқсат беру", (dialog, which) -> downloadUpdate(downloadUrl, expectedDigest))
+                .setCancelable(!mandatory);
+        if (!mandatory) builder.setNegativeButton("Кейін", null);
+        builder.show();
     }
 
     private void downloadUpdate(String downloadUrl, String expectedDigest) {
@@ -924,13 +966,21 @@ public class MainActivity extends FragmentActivity {
                 partFile.delete();
                 mainHandler.post(() -> {
                     closeDownloadDialog();
-                    new AlertDialog.Builder(this)
+                    boolean mandatory = getInstalledVersionCode() < MINIMUM_SUPPORTED_VERSION_CODE;
+                    AlertDialog.Builder builder = new AlertDialog.Builder(this)
                             .setTitle("Жаңарту орындалмады")
                             .setMessage(error.getMessage() == null
-                                    ? "Интернетті тексеріп, кейін қайталап көр."
+                                    ? "Интернетті тексеріп, қайта көр."
                                     : error.getMessage())
-                            .setPositiveButton("Жарайды", null)
-                            .show();
+                            .setPositiveButton(mandatory ? "Қайта көру" : "Жарайды", (dialog, which) -> {
+                                if (mandatory) {
+                                    updatePromptShown = false;
+                                    updateCheckFinished = false;
+                                    scheduleUpdateCheck();
+                                }
+                            })
+                            .setCancelable(!mandatory);
+                    builder.show();
                 });
             } finally {
                 if (connection != null) connection.disconnect();
@@ -965,7 +1015,12 @@ public class MainActivity extends FragmentActivity {
                                 Uri.parse("package:" + getPackageName()));
                         startActivity(settingsIntent);
                     })
-                    .setNegativeButton("Кейін", (dialog, which) -> waitingForInstallPermission = false)
+                    .setNegativeButton("Кейін", (dialog, which) -> {
+                        waitingForInstallPermission = false;
+                        updatePromptShown = false;
+                        updateCheckFinished = false;
+                        scheduleUpdateCheck();
+                    })
                     .show();
             return;
         }
@@ -978,6 +1033,10 @@ public class MainActivity extends FragmentActivity {
             installIntent.putExtra(Intent.EXTRA_NOT_UNKNOWN_SOURCE, true);
             installIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
             installIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+            // If the user cancels Android's installer, onResume() must show
+            // the mandatory update prompt again instead of reopening the old app.
+            updatePromptShown = false;
+            updateCheckFinished = false;
             startActivity(installIntent);
         } catch (Exception error) {
             Toast.makeText(this, "Орнату терезесін ашу мүмкін болмады.", Toast.LENGTH_LONG).show();
@@ -1063,10 +1122,18 @@ public class MainActivity extends FragmentActivity {
     @Override
     protected void onResume() {
         super.onResume();
-        if (waitingForInstallPermission && Build.VERSION.SDK_INT >= 26
-                && getPackageManager().canRequestPackageInstalls()) {
-            waitingForInstallPermission = false;
-            installDownloadedUpdate();
+        if (waitingForInstallPermission && Build.VERSION.SDK_INT >= 26) {
+            if (getPackageManager().canRequestPackageInstalls()) {
+                waitingForInstallPermission = false;
+                installDownloadedUpdate();
+            } else if (getInstalledVersionCode() < MINIMUM_SUPPORTED_VERSION_CODE) {
+                // The user returned from Settings without granting the
+                // permission. Keep the old version blocked and ask again.
+                waitingForInstallPermission = false;
+                updatePromptShown = false;
+                updateCheckFinished = false;
+                showMandatoryUpdateUnavailable();
+            }
         }
         scheduleUpdateCheck();
     }

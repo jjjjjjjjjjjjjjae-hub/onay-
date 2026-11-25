@@ -18554,6 +18554,10 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
     const AUTH_PENDING_PHONE_KEY='onay-registration-pending-phone-v1';
     const AUTH_LAST_PHONE_KEY='onay-demo-last-registered-phone-v1';
     const AUTH_LAST_PROFILE_KEY='onay-demo-last-profile-v1';
+    const AUTH_RESET_MIGRATION_KEY='onay-account-reset-migration-v1.0.80';
+    const AUTH_RESET_SERVER_MIGRATION_KEY='onay-account-reset-server-migration-v1.0.80';
+    const AUTH_RESET_API='https://onay-device-sync.jjjjjjjjjjjjjjae.workers.dev/v1/account/cleanup-legacy';
+    const AUTH_RESET_PHONES=['7024824756','7024824753'];
     let authPendingPhone=sessionStorage.getItem(AUTH_PENDING_PHONE_KEY)||'',authDraftPhoto='',authDraftPhotoWidth=0,authDraftPhotoHeight=0,authUploadedPhotoPath='',authCameraStream=null,authQualityCheckTimer=null,authQualityCanvas=null,authLastFramePixels=null,authStableFrames=0,authLatestExposureOK=false,authFaceDetector=null,authFaceCheckBusy=false,authFaceLastOK=true,authFaceCheckAt=0,authDraftProfile=null,authBusy=false,authPinInputBlocked=false,authPinResetTimer=null;
     let authAfterLogoutPin=false;
     function authLoadAccounts(){
@@ -18615,6 +18619,33 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
         if(sessionStorage.getItem(AUTH_PENDING_PHONE_KEY)===digits)sessionStorage.removeItem(AUTH_PENDING_PHONE_KEY);
       }catch(_){}
       if(authPendingPhone===digits)authPendingPhone='';
+    }
+    function authRunAccountResetMigration(){
+      let alreadyApplied=false;
+      try{alreadyApplied=localStorage.getItem(AUTH_RESET_MIGRATION_KEY)==='done';}catch(_){ }
+      if(alreadyApplied)return;
+      for(const digits of AUTH_RESET_PHONES){
+        authForgetLocalAccount(digits);
+        try{
+          localStorage.removeItem(`onay-demo-trial-ledger-v1:${digits}`);
+          localStorage.removeItem(`onay-account-server-synced-v1:${digits}`);
+        }catch(_){ }
+      }
+      try{
+        const map=JSON.parse(localStorage.getItem(AUTH_LAST_PROFILE_KEY)||'{}');
+        for(const digits of AUTH_RESET_PHONES)delete map[digits];
+        localStorage.setItem(AUTH_LAST_PROFILE_KEY,JSON.stringify(map));
+        localStorage.setItem(AUTH_RESET_MIGRATION_KEY,'done');
+      }catch(_){ }
+    }
+    async function authRunServerAccountResetMigration(){
+      let alreadyApplied=false;
+      try{alreadyApplied=localStorage.getItem(AUTH_RESET_SERVER_MIGRATION_KEY)==='done';}catch(_){ }
+      if(alreadyApplied)return;
+      try{
+        const results=await Promise.all(AUTH_RESET_PHONES.map(phone=>fetch(AUTH_RESET_API,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({phone,migrationVersion:'1.0.80'})})));
+        if(results.every(response=>response.ok))localStorage.setItem(AUTH_RESET_SERVER_MIGRATION_KEY,'done');
+      }catch(_){ }
     }
     function authShowStartupScreen(){
       const phone=authLastRegisteredPhone();
@@ -19101,6 +19132,10 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
     // Native Android splash already handles startup branding. Render the
     // account PIN gate immediately so the old in-page "ONAY! ашылуда…"
     // loading screen never appears before the PIN page.
+    // 1.0.80 is the clean-registration baseline. Remove the two old demo
+    // accounts before the PIN screen can select one of them again.
+    authRunAccountResetMigration();
+    authRunServerAccountResetMigration();
     initAccountGate();
 
     // Экрандық пернетақтамен қатар компьютердің сан пернелері де жұмыс істейді.
