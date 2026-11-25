@@ -17387,6 +17387,8 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
       window.onayQrPairingMode=qrPairingMode;
       const root=el('onay-app-root');
       const page=el('page-qr');
+      const createTab=el('qr-tab-create');
+      const scanTab=el('qr-tab-scan');
       if(root)root.classList.toggle('app-pairing-qr-open',qrPairingMode);
       if(page){
         if(qrPairingMode){
@@ -17410,6 +17412,14 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
           page.style.removeProperty('pointer-events');
         }
       }
+      if(createTab){
+        // Device sync must stay on the scanner. The normal QR-payment create
+        // section is unrelated to pairing and only makes the flow confusing.
+        createTab.hidden=qrPairingMode;
+        createTab.setAttribute('aria-hidden',String(qrPairingMode));
+        createTab.tabIndex=qrPairingMode?-1:0;
+      }
+      if(scanTab)scanTab.style.width=qrPairingMode?'100%':'';
       const title=document.querySelector('#page-qr .qr-head h2');
       const help=document.querySelector('#page-qr .qr-help-text');
       const manual=document.querySelector('#page-qr .qr-code-manual');
