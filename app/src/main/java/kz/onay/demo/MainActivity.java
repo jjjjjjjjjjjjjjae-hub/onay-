@@ -8,7 +8,6 @@ import android.content.Intent;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.Signature;
-import android.graphics.Color;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
@@ -16,8 +15,6 @@ import android.os.Handler;
 import android.os.Looper;
 import android.provider.MediaStore;
 import android.provider.Settings;
-import android.view.Gravity;
-import android.view.ViewGroup;
 import android.webkit.JavascriptInterface;
 import android.webkit.PermissionRequest;
 import android.webkit.ValueCallback;
@@ -26,7 +23,6 @@ import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.widget.FrameLayout;
-import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.core.content.FileProvider;
@@ -141,17 +137,6 @@ public class MainActivity extends Activity {
 
         web.loadUrl("https://" + APP_ASSET_HOST + "/assets/index.html");
         root.addView(web, new FrameLayout.LayoutParams(-1, -1));
-
-        TextView demo = new TextView(this);
-        demo.setText("DEMO • РЕСМИ ЕМЕС • ТӨЛЕМ ҚҰЖАТЫ ЕМЕС");
-        demo.setTextColor(Color.WHITE);
-        demo.setTextSize(11);
-        demo.setGravity(Gravity.CENTER);
-        demo.setPadding(8, 8, 8, 8);
-        demo.setBackgroundColor(Color.rgb(160, 35, 35));
-        FrameLayout.LayoutParams bannerParams = new FrameLayout.LayoutParams(
-                -1, ViewGroup.LayoutParams.WRAP_CONTENT, Gravity.TOP);
-        root.addView(demo, bannerParams);
 
         setContentView(root);
         requestCameraPermissionOnEntry();
