@@ -142,7 +142,7 @@ async function accountSnapshotWithPin(body, phone) {
   if (
     account
     && !account.serverPinHash
-    && /^d{4}$/.test(String(body?.pin || ""))
+    && /^[0-9]{4}$/.test(String(body?.pin || ""))
     && account.pinSalt
   ) {
     const serverPinHash = await derivePinHash(String(body.pin), base64Bytes(account.pinSalt));
