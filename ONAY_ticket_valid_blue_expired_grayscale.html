@@ -19694,5 +19694,43 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
 }
 </style>
 
+<style id="bottom-navigation-safe-area">
+/* Keep the five main actions close to the bottom while respecting the
+   iPhone home-indicator area. Android's native host removes its navigation
+   inset from the WebView viewport before this rule is applied. */
+:root {
+  --onay-nav-edge-gap: clamp(3px, 0.8cqw, 5px);
+}
+
+#page-main,
+#page-routes,
+#page-menu,
+#page-life {
+  --nav-bottom: max(var(--onay-nav-edge-gap), env(safe-area-inset-bottom, 0px));
+}
+
+#page-routes .route-bottom-nav,
+#page-menu .menu-bottom-bar,
+#page-life .life-bottom-bar {
+  margin-bottom: var(--nav-bottom) !important;
+}
+
+#page-main .onay-bottom-bar {
+  bottom: var(--nav-bottom) !important;
+}
+
+/* The centre QR action follows the same baseline as the other four actions. */
+#page-main .onay-bottom-action,
+#page-routes .route-bottom-button,
+#page-menu .onay-bottom-action,
+#page-life .onay-bottom-action {
+  transform: translateY(clamp(1px, 0.35cqw, 2px));
+}
+
+@media (max-height: 680px) {
+  :root { --onay-nav-edge-gap: 3px; }
+}
+</style>
+
 </body>
 </html>

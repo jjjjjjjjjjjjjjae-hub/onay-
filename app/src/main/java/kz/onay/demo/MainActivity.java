@@ -94,8 +94,18 @@ public class MainActivity extends Activity {
             Insets systemBars = insets.getInsets(
                     WindowInsetsCompat.Type.systemBars()
                             | WindowInsetsCompat.Type.displayCutout());
+            Insets navigationBars = insets.getInsets(
+                    WindowInsetsCompat.Type.navigationBars());
+            Insets systemGestures = insets.getInsets(
+                    WindowInsetsCompat.Type.systemGestures());
+            // Three-button navigation reports a navigation-bar inset, while
+            // gesture navigation can report only a bottom system-gesture
+            // inset. Use the larger value so the HTML bottom navigation stays
+            // just above either Android navigation treatment.
+            int safeBottom = Math.max(systemBars.bottom,
+                    Math.max(navigationBars.bottom, systemGestures.bottom));
             view.setPadding(systemBars.left, systemBars.top,
-                    systemBars.right, systemBars.bottom);
+                    systemBars.right, safeBottom);
             return insets;
         });
 
