@@ -18916,12 +18916,33 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
       if(!account?.pinSalt||!account?.pinHash){authSetError('Алдымен аккаунтқа PIN-код орнатыңыз.');return;}
       authBusy=true;
       try{
+        // Android-та жүйелік BiometricPrompt WebView/WebAuthn-нан сенімдірек.
+        // Браузерде немесе ескі APK-та native bridge болмаса, WebAuthn
+        // нұсқасы төмендегі fallback ретінде жұмысын жалғастырады.
+        const nativeBiometric=window.OnayNative
+          && typeof window.OnayNative.isBiometricAvailable==='function'
+          && typeof window.OnayNative.authenticateBiometric==='function';
+        if(nativeBiometric&&window.OnayNative.isBiometricAvailable()){
+          window.__onayNativeBiometricPending=true;
+          window.OnayNative.authenticateBiometric();
+          return;
+        }
         if(!account.biometricCredentialId||!account.biometricPublicKey)await authEnableBiometric(account);
         else await authBiometricLogin(account);
       }catch(error){
+        window.__onayNativeBiometricPending=false;
         if(error?.name==='NotAllowedError')authSetError('Биометриялық сұрау тоқтатылды немесе расталмады. Қайта көріңіз не PIN-кодты енгізіңіз.');
         else authSetError(error?.message||'Биометрияны іске қосу мүмкін болмады. PIN-кодты пайдаланыңыз.');
-      }finally{authBusy=false;}
+      }finally{if(!window.__onayNativeBiometricPending)authBusy=false;}
+    }
+    window.onayNativeBiometricResult=function(success,message){
+      if(!window.__onayNativeBiometricPending)return;
+      window.__onayNativeBiometricPending=false;authBusy=false;
+      if(success){
+        const account=authLoadAccounts()[authPendingPhone];
+        if(account?.pinSalt&&account?.pinHash)authCompleteLogin(account);
+        else authSetError('Аккаунт табылмады. PIN-код арқылы қайта кіріңіз.');
+      }else if(message)authSetError(message);
     }
     function authCompleteLogin(account){
       authRememberLastPhone(authPendingPhone);
@@ -19729,6 +19750,58 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
 
 @media (max-height: 680px) {
   :root { --onay-nav-edge-gap: 3px; }
+}
+</style>
+
+<style id="bottom-navigation-system-inset">
+/* The native Android host lets the WebView draw into the bottom system area.
+   This keeps the panel white to the gesture handle while its controls stay
+   above the handle or the three-button navigation bar. */
+:root {
+  --onay-native-bottom-inset: 0px;
+  --onay-nav-safe-bottom: max(var(--onay-native-bottom-inset), env(safe-area-inset-bottom, 0px));
+}
+
+#page-main,
+#page-routes,
+#page-menu,
+#page-life {
+  --nav-bottom: 0px;
+  --onay-nav-safe-bottom: max(var(--onay-native-bottom-inset), env(safe-area-inset-bottom, 0px));
+}
+
+#page-main .onay-bottom-bar,
+#page-routes .route-bottom-nav,
+#page-menu .menu-bottom-bar,
+#page-life .life-bottom-bar {
+  box-sizing: border-box !important;
+  height: calc(var(--nav-h) + var(--onay-nav-safe-bottom)) !important;
+  min-height: calc(var(--nav-h) + var(--onay-nav-safe-bottom)) !important;
+  padding-bottom: calc(var(--onay-nav-safe-bottom) + var(--onay-nav-edge-gap)) !important;
+}
+
+#page-main .onay-bottom-bar {
+  bottom: 0 !important;
+}
+
+#page-routes .route-bottom-nav,
+#page-menu .menu-bottom-bar,
+#page-life .life-bottom-bar {
+  margin-bottom: 0 !important;
+}
+
+#page-main .cards-peek-sheet {
+  bottom: calc(var(--nav-h) + var(--onay-nav-safe-bottom)) !important;
+}
+#my-cards-panel {
+  padding-bottom: calc(var(--nav-h) + var(--onay-nav-safe-bottom) + clamp(78px, 24cqw, 98px)) !important;
+}
+#page-routes .route-catalog-scroll {
+  padding-bottom: calc(var(--nav-h) + var(--onay-nav-safe-bottom) + clamp(38px, 12cqw, 50px)) !important;
+}
+#page-menu .menu-content,
+#page-life .life-content {
+  padding-bottom: calc(8cqw + var(--nav-h) + var(--onay-nav-safe-bottom)) !important;
 }
 </style>
 

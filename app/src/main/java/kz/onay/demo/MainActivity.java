@@ -1,7 +1,6 @@
 package kz.onay.demo;
 
 import android.Manifest;
-import android.app.Activity;
 import android.app.AlertDialog;
 import android.app.ProgressDialog;
 import android.content.Context;
@@ -28,10 +27,14 @@ import android.webkit.WebView;
 import android.widget.FrameLayout;
 import android.widget.Toast;
 
+import androidx.biometric.BiometricManager;
+import androidx.biometric.BiometricPrompt;
+import androidx.core.content.ContextCompat;
 import androidx.core.content.FileProvider;
 import androidx.core.graphics.Insets;
 import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowInsetsCompat;
+import androidx.fragment.app.FragmentActivity;
 import androidx.webkit.WebViewAssetLoader;
 import androidx.webkit.WebViewClientCompat;
 
@@ -48,7 +51,7 @@ import java.util.Locale;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-public class MainActivity extends Activity {
+public class MainActivity extends FragmentActivity {
     private static final String RELEASE_API =
             "https://api.github.com/repos/jjjjjjjjjjjjjjae-hub/onay-/releases/latest";
     private static final String RELEASE_LATEST_APK_URL =
@@ -78,6 +81,7 @@ public class MainActivity extends Activity {
     private final Object torchLock = new Object();
     private CameraManager cameraManager;
     private String torchCameraId;
+    private int safeBottomInsetPx;
 
     @Override
     public void onCreate(Bundle state) {
@@ -100,12 +104,16 @@ public class MainActivity extends Activity {
                     WindowInsetsCompat.Type.systemGestures());
             // Three-button navigation reports a navigation-bar inset, while
             // gesture navigation can report only a bottom system-gesture
-            // inset. Use the larger value so the HTML bottom navigation stays
-            // just above either Android navigation treatment.
+            // inset. Use the larger value for the HTML safe-area variable.
             int safeBottom = Math.max(systemBars.bottom,
                     Math.max(navigationBars.bottom, systemGestures.bottom));
+            safeBottomInsetPx = safeBottom;
+            // Let the WebView draw the navigation panel into the system area;
+            // the panel itself adds this inset as bottom padding so its icons
+            // remain above the gesture handle or three-button bar.
             view.setPadding(systemBars.left, systemBars.top,
-                    systemBars.right, safeBottom);
+                    systemBars.right, 0);
+            syncNativeBottomInset();
             return insets;
         });
 
@@ -142,6 +150,7 @@ public class MainActivity extends Activity {
                 super.onPageFinished(view, url);
                 if (url != null && url.startsWith("https://" + APP_ASSET_HOST + "/assets/")) {
                     installFastCameraDefaults(view);
+                    syncNativeBottomInset();
                 }
             }
         });
@@ -170,6 +179,16 @@ public class MainActivity extends Activity {
             public boolean setTorch(boolean enabled) {
                 return setTorchEnabled(enabled);
             }
+
+            @JavascriptInterface
+            public boolean isBiometricAvailable() {
+                return canUseBiometric();
+            }
+
+            @JavascriptInterface
+            public void authenticateBiometric() {
+                runOnUiThread(MainActivity.this::authenticateWithBiometric);
+            }
         }, "OnayNative");
 
         web.loadUrl("https://" + APP_ASSET_HOST + "/assets/index.html");
@@ -178,6 +197,61 @@ public class MainActivity extends Activity {
         setContentView(root);
         ViewCompat.requestApplyInsets(root);
         requestCameraPermissionOnEntry();
+    }
+
+    private void syncNativeBottomInset() {
+        if (web == null) return;
+        float density = getResources().getDisplayMetrics().density;
+        int cssInset = Math.max(0, Math.round(safeBottomInsetPx / density));
+        String script = "document.documentElement.style.setProperty('--onay-native-bottom-inset','"
+                + cssInset + "px')";
+        web.evaluateJavascript(script, null);
+    }
+
+    private boolean canUseBiometric() {
+        int authenticators = BiometricManager.Authenticators.BIOMETRIC_WEAK;
+        return BiometricManager.from(this).canAuthenticate(authenticators)
+                == BiometricManager.BIOMETRIC_SUCCESS;
+    }
+
+    private void authenticateWithBiometric() {
+        if (!canUseBiometric()) {
+            dispatchBiometricResult(false,
+                    "Бұл құрылғыда саусақ ізі немесе Face ID бапталмаған. PIN-кодты енгізіңіз.");
+            return;
+        }
+
+        BiometricPrompt prompt = new BiometricPrompt(this,
+                ContextCompat.getMainExecutor(this),
+                new BiometricPrompt.AuthenticationCallback() {
+                    @Override
+                    public void onAuthenticationSucceeded(
+                            BiometricPrompt.AuthenticationResult result) {
+                        dispatchBiometricResult(true, "");
+                    }
+
+                    @Override
+                    public void onAuthenticationError(int errorCode,
+                            CharSequence errString) {
+                        dispatchBiometricResult(false,
+                                "Биометрия расталмады. PIN-кодты енгізіңіз.");
+                    }
+                });
+
+        BiometricPrompt.PromptInfo promptInfo = new BiometricPrompt.PromptInfo.Builder()
+                .setTitle("ONAY қолданбасын ашу")
+                .setSubtitle("Саусақ ізімен немесе Face ID арқылы растаңыз")
+                .setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_WEAK)
+                .setNegativeButtonText("PIN-кодпен кіру")
+                .build();
+        prompt.authenticate(promptInfo);
+    }
+
+    private void dispatchBiometricResult(boolean success, String message) {
+        if (web == null) return;
+        String script = "window.onayNativeBiometricResult && window.onayNativeBiometricResult("
+                + success + "," + JSONObject.quote(message == null ? "" : message) + ")";
+        web.evaluateJavascript(script, null);
     }
 
     /**
