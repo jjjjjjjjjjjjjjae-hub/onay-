@@ -135,12 +135,12 @@
 #page-qr.hidden {display:none!important;}
 .qr-head {height:58px;flex-shrink:0;display:flex;align-items:center;gap:22px;
   width:100%;max-width:100%;overflow:hidden;padding:0 max(14px,env(safe-area-inset-right)) 0 max(14px,env(safe-area-inset-left));
-  background:#fff;position:relative;z-index:5;transform:translateY(10px);}
+  background:#fff;position:relative;z-index:30;pointer-events:auto;touch-action:manipulation;transform:translateY(14px);}
 .qr-back{display:grid;place-items:center;flex:0 0 34px;height:43px;width:34px;font-size:23px;color:#111;}
 .qr-head h2{min-width:0;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:17px;font-weight:800;color:#121212;margin:0;}
-.qr-tabs {height:54px;flex-shrink:0;display:flex;width:100%;max-width:100%;overflow:hidden;background:#fff;border-bottom:1px solid #eee;position:relative;z-index:5;transform:translateY(10px);}
+.qr-tabs {height:54px;flex-shrink:0;display:flex;width:100%;max-width:100%;overflow:hidden;background:#fff;border-bottom:1px solid #eee;position:relative;z-index:30;pointer-events:auto;touch-action:manipulation;transform:translateY(14px);}
 .qr-tab{position:relative;width:50%;border:0;background:#fff;color:#747474;font-size:13px;
-  min-width:0;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:0 max(10px,env(safe-area-inset-right)) 0 max(10px,env(safe-area-inset-left));}
+  min-width:0;display:flex;align-items:center;justify-content:space-between;gap:8px;padding:0 max(10px,env(safe-area-inset-right)) 0 max(10px,env(safe-area-inset-left));touch-action:manipulation;}
 .qr-tab span{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-weight:500;}
 .qr-tab svg{flex:0 0 auto;}
 .qr-tab i {color:#1c1d29;font-size:20px;}
@@ -153,7 +153,8 @@
 /* SCANNER */
 .qr-scan-panel{background:#000;isolation:isolate;overflow:hidden;}
 /* Маңызды: видео z-index:-1 болғанда қара фонның астында қалып қоятын еді. */
-#qr-camera{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:0;background:#000;}
+#qr-camera{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;z-index:0;background:#000;visibility:hidden;}
+#qr-camera.qr-camera-ready{visibility:visible;}
 .qr-scan-dim{position:absolute;inset:0;z-index:1;pointer-events:none;background:linear-gradient(180deg,#0b0a0944 0%,#0f0c0844 38%,#0f090766 100%);}
 .qr-scan-instructions,.qr-code-manual{z-index:3;}
 .qr-scan-square{z-index:2;pointer-events:none;}
@@ -17497,6 +17498,7 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
       const id=++qrCameraRequestId;
       qrCameraStarting=true;
       hideQrCameraMessage();
+      el('qr-camera').classList.remove('qr-camera-ready');
       let stream;
       try {
         try {
@@ -17518,6 +17520,7 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
         if (!cameraTabIsOpen() || id !== qrCameraRequestId) {
           stream.getTracks().forEach(t=>t.stop()); video.srcObject=null; return;
         }
+        video.classList.add('qr-camera-ready');
         qrStream=stream;
         hideQrCameraMessage();
         startQrDecoder();
@@ -17550,6 +17553,7 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
       if(qrStream) {qrStream.getTracks().forEach(t=>t.stop());qrStream=null;}
       el('qr-camera').pause();
       el('qr-camera').srcObject=null;
+      el('qr-camera').classList.remove('qr-camera-ready');
       ++qrTorchRequestId;qrTorchBusy=false;qrTorchOn=false;
       updateQrTorchButton();
       hideQrCameraMessage();
