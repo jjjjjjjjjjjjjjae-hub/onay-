@@ -165,12 +165,14 @@
     data.lastProfile=lastProfile||account&&account.profile||null;
     return data;
   }
-  async function syncAccountSnapshot(){
+  async function syncAccountSnapshot(pin){
     var phone=accountPhone();
     if(phone.length<10||!window.__onayDemoAccount)return false;
     try{
       var data=snapshotPayload(phone);
-      await request('/v1/account/snapshot',{phone:phone,deviceId:getDeviceId(),account:data.account,lastProfile:data.lastProfile,ledger:data.ledger,favorites:data.favorites});
+      var body={phone:phone,deviceId:getDeviceId(),account:data.account,lastProfile:data.lastProfile,ledger:data.ledger,favorites:data.favorites};
+      if(/^\d{4}$/.test(String(pin||'')))body.pin=String(pin);
+      await request('/v1/account/snapshot',body);
       return true;
     }catch(_){return false;}
   }
