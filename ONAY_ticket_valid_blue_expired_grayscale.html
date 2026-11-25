@@ -17084,6 +17084,51 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
       refreshTopupCardInfo();
     }
     function closeTopUpPage() { el('page-topup').classList.add('hidden'); }
+
+    // Android-тың артқа батырмасы алдымен ашық беттен басты экранға қайтсын.
+    // Басты экранда ғана екі рет басылғанда қолданбадан шығуға рұқсат етіледі.
+    window.onayHandleNativeBack = function(){
+      const isOpen = (id) => {
+        const node = el(id);
+        return !!node && !node.hidden && !node.classList.contains('hidden');
+      };
+      const overlays = [
+        ['family-scan-overlay', closeFamilyScanner],
+        ['family-help-overlay', closeFamilyHelp],
+        ['route-detail-overlay', hideRouteDetail],
+        ['history-dialog-overlay', closeHistorySheet],
+        ['trial-ticket-overlay', closeTrialTicket],
+        ['codepay-help-overlay', closeCodePayHelp],
+        ['monthly-rules-overlay', closeMonthlyRules],
+        ['tickets-sheet-overlay', closeTicketsSheet],
+        ['qr-zoom', closeQrZoom],
+        ['qr-manual', closeQrManual]
+      ];
+      for (const [id, close] of overlays) {
+        if (isOpen(id)) { close(); return true; }
+      }
+      const pages = [
+        ['page-topup', closeTopUpPage],
+        ['page-transfer', closeTransferPage],
+        ['page-notifications', closeNotifications],
+        ['page-routes', closeRoutesPage],
+        ['page-family', closeFamilyPage],
+        ['page-history', closeHistoryPage],
+        ['page-life', lifeBack],
+        ['page-menu', menuBack],
+        ['page-trial-confirm', closeTrialConfirmation],
+        ['page-trial-thread', closeTrialThread],
+        ['page-qr', closeQrPage],
+        ['page-transport-result', closeTransportQrResult],
+        ['page-codepay', closeCodePayPage],
+        ['page-my-tickets', closeMyTicketsPage],
+        ['page-monthly-pass', closeMonthlyPassPage]
+      ];
+      for (const [id, close] of pages) {
+        if (isOpen(id)) { close(); return true; }
+      }
+      return false;
+    };
     function setTopupCard(index) {
       if(index!==0)return;selectedTopupCardIndex = 0;
       refreshTopupCardInfo();

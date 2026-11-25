@@ -88,6 +88,9 @@ public class MainActivity extends FragmentActivity {
     private boolean updatePromptShown = false;
     private final Object torchLock = new Object();
     private CameraManager cameraManager;
+    private static final long EXIT_BACK_PRESS_WINDOW_MS = 2000L;
+    private long lastBackPressAt = 0L;
+    private boolean backDispatchInFlight = false;
     private String torchCameraId;
     private int safeBottomInsetPx;
     private static final long SPLASH_FIRST_STAGE_DURATION_MS = 1400L;
@@ -1076,11 +1079,42 @@ public class MainActivity extends FragmentActivity {
 
     @Override
     public void onBackPressed() {
-        if (web != null && web.canGoBack()) {
-            web.goBack();
-        } else {
+        if (backDispatchInFlight) return;
+        if (web == null) {
             super.onBackPressed();
+            return;
         }
+
+        // Let the bundled UI close an open screen (for example, Толықтыру)
+        // before Android considers leaving the activity.
+        backDispatchInFlight = true;
+        web.evaluateJavascript(
+                "(function(){try{return !!(window.onayHandleNativeBack "
+                        + "&& window.onayHandleNativeBack());}catch(e){return false;}})();",
+                value -> {
+                    backDispatchInFlight = false;
+                    if (isFinishing() || web == null) return;
+                    if ("true".equals(value)) {
+                        lastBackPressAt = 0L;
+                        return;
+                    }
+                    if (web.canGoBack()) {
+                        lastBackPressAt = 0L;
+                        web.goBack();
+                        return;
+                    }
+
+                    long now = SystemClock.uptimeMillis();
+                    if (now - lastBackPressAt < EXIT_BACK_PRESS_WINDOW_MS) {
+                        lastBackPressAt = 0L;
+                        super.onBackPressed();
+                    } else {
+                        lastBackPressAt = now;
+                        Toast.makeText(MainActivity.this,
+                                "Шығу үшін артқа тағы бір рет басыңыз",
+                                Toast.LENGTH_SHORT).show();
+                    }
+                });
     }
 
     @Override
