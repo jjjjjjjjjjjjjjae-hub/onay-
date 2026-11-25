@@ -208,16 +208,25 @@ public class MainActivity extends FragmentActivity {
         web.evaluateJavascript(script, null);
     }
 
-    private boolean canUseBiometric() {
+    private int getAllowedAuthenticators() {
         int authenticators = BiometricManager.Authenticators.BIOMETRIC_WEAK;
-        return BiometricManager.from(this).canAuthenticate(authenticators)
+        // Android 9+ can also use the phone's PIN, pattern, or password.
+        // Older Android versions keep the biometric-only path for compatibility.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            authenticators |= BiometricManager.Authenticators.DEVICE_CREDENTIAL;
+        }
+        return authenticators;
+    }
+
+    private boolean canUseBiometric() {
+        return BiometricManager.from(this).canAuthenticate(getAllowedAuthenticators())
                 == BiometricManager.BIOMETRIC_SUCCESS;
     }
 
     private void authenticateWithBiometric() {
         if (!canUseBiometric()) {
             dispatchBiometricResult(false,
-                    "Бұл құрылғыда саусақ ізі немесе Face ID бапталмаған. PIN-кодты енгізіңіз.");
+                    "Телефонда саусақ ізі, Face ID немесе экран құлпы бапталмаған. Қолданба PIN-кодын енгізіңіз.");
             return;
         }
 
@@ -234,17 +243,21 @@ public class MainActivity extends FragmentActivity {
                     public void onAuthenticationError(int errorCode,
                             CharSequence errString) {
                         dispatchBiometricResult(false,
-                                "Биометрия расталмады. PIN-кодты енгізіңіз.");
+                                "Биометрия немесе телефон құлпы расталмады. Қолданба PIN-кодын енгізіңіз.");
                     }
                 });
 
-        BiometricPrompt.PromptInfo promptInfo = new BiometricPrompt.PromptInfo.Builder()
-                .setTitle("ONAY қолданбасын ашу")
-                .setSubtitle("Саусақ ізімен немесе Face ID арқылы растаңыз")
-                .setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_WEAK)
-                .setNegativeButtonText("PIN-кодпен кіру")
-                .build();
-        prompt.authenticate(promptInfo);
+        int allowedAuthenticators = getAllowedAuthenticators();
+        BiometricPrompt.PromptInfo.Builder promptBuilder =
+                new BiometricPrompt.PromptInfo.Builder()
+                        .setTitle("ONAY қолданбасын ашу")
+                        .setSubtitle("Саусақ ізі, Face ID немесе телефон құлпы арқылы растаңыз")
+                        .setAllowedAuthenticators(allowedAuthenticators);
+        // Device credential replaces the negative button in the system prompt.
+        if ((allowedAuthenticators & BiometricManager.Authenticators.DEVICE_CREDENTIAL) == 0) {
+            promptBuilder.setNegativeButtonText("Қолданба PIN-кодымен кіру");
+        }
+        prompt.authenticate(promptBuilder.build());
     }
 
     private void dispatchBiometricResult(boolean success, String message) {

@@ -18920,9 +18920,8 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
         // Браузерде немесе ескі APK-та native bridge болмаса, WebAuthn
         // нұсқасы төмендегі fallback ретінде жұмысын жалғастырады.
         const nativeBiometric=window.OnayNative
-          && typeof window.OnayNative.isBiometricAvailable==='function'
           && typeof window.OnayNative.authenticateBiometric==='function';
-        if(nativeBiometric&&window.OnayNative.isBiometricAvailable()){
+        if(nativeBiometric){
           window.__onayNativeBiometricPending=true;
           window.OnayNative.authenticateBiometric();
           return;
