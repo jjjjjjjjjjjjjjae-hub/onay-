@@ -699,7 +699,7 @@
       if(autoPairBusy)return;
       autoPairBusy=true;
       request('/v1/account/status',{phone:digits,deviceId:getDeviceId()}).then(function(result){
-        if(!result||result.registered!==true)return original.apply(this,callArgs);
+        if(!result|| (result.registered!==true&&result.hasSnapshot!==true))return original.apply(this,callArgs);
         var localAccount=localAccountForPhone(digits);
         // A reinstall creates a new device id and has no local account. The
         // server PIN restores the account and transfers ownership directly;

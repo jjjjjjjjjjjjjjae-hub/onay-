@@ -348,10 +348,10 @@ async function accountStatus(request, env) {
   const owner = status.registered
     && deviceId.length >= 8
     && status.ownerDeviceId === deviceId;
-  const snapshot = status.registered
-    ? await env.DB.prepare("SELECT 1 AS present FROM account_snapshots WHERE phone_hash = ?")
-      .bind(status.phoneHash).first()
-    : null;
+  // Snapshots survive a registration reset. This lets a clean phone/device
+  // registration restore the same account with the phone number and PIN.
+  const snapshot = await env.DB.prepare("SELECT 1 AS present FROM account_snapshots WHERE phone_hash = ?")
+    .bind(status.phoneHash).first();
   return json({ ok: true, registered: status.registered, online: status.online, owner, hasSnapshot: !!snapshot });
 }
 
