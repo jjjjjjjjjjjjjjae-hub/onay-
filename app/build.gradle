@@ -20,7 +20,9 @@ android {
     compileSdk 35
 
     defaultConfig {
-        applicationId 'kz.onay'
+        // Keep the install ID stable so existing signed APKs can update.
+        // The Java namespace itself is kz.onay.
+        applicationId 'kz.onay.demo'
         minSdk 24
         targetSdk 35
         versionCode appVersionCodeValue
