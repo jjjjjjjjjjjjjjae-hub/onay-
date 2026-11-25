@@ -89,8 +89,7 @@ async function cleanupPairRequests(env) {
   ).bind(nowSeconds()).run();
 }
 
-async function phoneRegistrationStatus(env, phone) {
-  const phoneHash = await sha256Hex(phone);
+async function phoneRegistrationStatusByHash(env, phoneHash) {
   const registration = await env.DB.prepare(
     "SELECT owner_device_id FROM registered_phones WHERE phone_hash = ?"
   ).bind(phoneHash).first();
@@ -112,6 +111,10 @@ async function phoneRegistrationStatus(env, phone) {
     online,
     ownerDeviceId: String(registration.owner_device_id || ""),
   };
+}
+
+async function phoneRegistrationStatus(env, phone) {
+  return phoneRegistrationStatusByHash(env, await sha256Hex(phone));
 }
 
 async function registerPhone(request, env) {
@@ -147,11 +150,36 @@ async function registerPhone(request, env) {
 async function accountStatus(request, env) {
   const body = await readJson(request);
   const phone = normalizePhone(body?.phone);
+  const deviceId = normalizeDeviceId(body?.deviceId);
   if (phone.length < 10 || phone.length > 15) {
     return json({ ok: false, error: "invalid_phone" }, 400);
   }
   const status = await phoneRegistrationStatus(env, phone);
-  return json({ ok: true, registered: status.registered, online: status.online });
+  const owner = status.registered
+    && deviceId.length >= 8
+    && status.ownerDeviceId === deviceId;
+  return json({ ok: true, registered: status.registered, online: status.online, owner });
+}
+
+async function logoutPresence(request, env) {
+  const body = await readJson(request);
+  const phone = normalizePhone(body?.phone);
+  const deviceId = normalizeDeviceId(body?.deviceId);
+  if (phone.length < 10 || phone.length > 15 || deviceId.length < 8) {
+    return json({ ok: false, error: "invalid_presence" }, 400);
+  }
+
+  const registration = await phoneRegistrationStatus(env, phone);
+  if (!registration.registered) {
+    return json({ ok: false, error: "phone_not_registered" }, 404);
+  }
+  if (registration.ownerDeviceId !== deviceId) {
+    return json({ ok: false, error: "device_not_owner" }, 403);
+  }
+
+  await env.DB.prepare("DELETE FROM pair_presence WHERE phone_hash = ? AND device_id = ?")
+    .bind(registration.phoneHash, deviceId).run();
+  return json({ ok: true, online: false });
 }
 
 async function createPairing(request, env) {
@@ -329,8 +357,18 @@ async function requestPairing(request, env) {
 async function pendingPairing(request, env) {
   const body = await readJson(request);
   const phone = normalizePhone(body?.phone);
+  const deviceId = normalizeDeviceId(body?.deviceId);
   if (phone.length < 10 || phone.length > 15) {
     return json({ ok: false, error: "invalid_phone" }, 400);
+  }
+  if (deviceId.length < 8) return json({ ok: false, error: "invalid_device" }, 400);
+
+  const registration = await phoneRegistrationStatus(env, phone);
+  if (!registration.registered) {
+    return json({ ok: false, error: "phone_not_registered" }, 404);
+  }
+  if (registration.ownerDeviceId !== deviceId) {
+    return json({ ok: false, error: "device_not_owner" }, 403);
   }
 
   await cleanupPairRequests(env);
@@ -353,11 +391,17 @@ async function rejectPairing(request, env) {
   const body = await readJson(request);
   const requestId = String(body?.requestId || "").trim().slice(0, 100);
   const phone = normalizePhone(body?.phone);
+  const deviceId = normalizeDeviceId(body?.deviceId);
   if (!requestId || phone.length < 10 || phone.length > 15) {
     return json({ ok: false, error: "invalid_request" }, 400);
   }
+  if (deviceId.length < 8) return json({ ok: false, error: "invalid_device" }, 400);
 
   const phoneHash = await sha256Hex(phone);
+  const registration = await phoneRegistrationStatus(env, phone);
+  if (!registration.registered || registration.ownerDeviceId !== deviceId) {
+    return json({ ok: false, error: "device_not_owner" }, 403);
+  }
   const result = await env.DB.prepare(
     "UPDATE pair_requests SET status = 'rejected' WHERE request_id = ? AND phone_hash = ? AND status = 'pending'"
   ).bind(requestId, phoneHash).run();
@@ -371,12 +415,14 @@ async function approvePairing(request, env) {
   const body = await readJson(request);
   const requestId = String(body?.requestId || "").trim().slice(0, 100);
   const phone = normalizePhone(body?.phone);
+  const approverDeviceId = normalizeDeviceId(body?.deviceId);
   const encryptedPayload = String(body?.encryptedPayload || "");
   const code = String(body?.pairCode || "").replace(/\D/g, "");
 
   if (!requestId || phone.length < 10 || phone.length > 15) {
     return json({ ok: false, error: "invalid_request" }, 400);
   }
+  if (approverDeviceId.length < 8) return json({ ok: false, error: "invalid_device" }, 400);
   if (encryptedPayload.length < 16 || encryptedPayload.length > MAX_ENCRYPTED_PAYLOAD_LENGTH) {
     return json({ ok: false, error: "invalid_payload" }, 400);
   }
@@ -385,6 +431,10 @@ async function approvePairing(request, env) {
   }
 
   const phoneHash = await sha256Hex(phone);
+  const registration = await phoneRegistrationStatus(env, phone);
+  if (!registration.registered || registration.ownerDeviceId !== approverDeviceId) {
+    return json({ ok: false, error: "device_not_owner" }, 403);
+  }
   const row = await env.DB.prepare(
     "SELECT status, expires_at FROM pair_requests WHERE request_id = ? AND phone_hash = ?"
   ).bind(requestId, phoneHash).first();
@@ -401,7 +451,7 @@ async function approvePairing(request, env) {
   const codeHash = await sha256Hex(code);
   const result = await env.DB.prepare(
     "UPDATE pair_requests SET status = 'approved', pair_code_hash = ?, payload_json = ?, approved_at = ? WHERE request_id = ? AND phone_hash = ? AND status = 'pending'"
-  ).bind(codeHash, JSON.stringify({ encryptedPayload }), nowSeconds(), requestId, phoneHash).run();
+  ).bind(codeHash, JSON.stringify({ encryptedPayload, approverDeviceId }), nowSeconds(), requestId, phoneHash).run();
   if (!result.success || Number(result.meta?.changes || 0) !== 1) {
     return json({ ok: false, error: "request_already_handled" }, 409);
   }
@@ -474,28 +524,37 @@ async function claimRequestedPairing(request, env) {
     return json({ ok: false, error: "stored_payload_invalid" }, 500);
   }
 
-  const claimedAt = nowIso();
-  const claimedAtSeconds = nowSeconds();
-  const result = await env.DB.prepare(
-    "UPDATE pair_requests SET status = 'claimed', payload_json = NULL, claimed_at = ? WHERE request_id = ? AND status = 'approved' AND pair_code_hash = ?"
-  ).bind(claimedAtSeconds, requestId, codeHash).run();
-  if (!result.success || Number(result.meta?.changes || 0) !== 1) {
-    return json({ ok: false, error: "code_already_claimed" }, 409);
+  const registration = await phoneRegistrationStatusByHash(env, row.phone_hash);
+  if (!registration.registered || !stored.approverDeviceId
+      || registration.ownerDeviceId !== String(stored.approverDeviceId)) {
+    await env.DB.prepare(
+      "UPDATE pair_requests SET status = 'expired' WHERE request_id = ? AND status = 'approved'"
+    ).bind(requestId).run();
+    return json({ ok: false, error: "request_stale" }, 409);
   }
 
-  // The claimed device becomes the only active device for this number.
-  // The old device will receive device_not_owner on its next heartbeat and
-  // immediately return to the PIN/login screen.
-  const ownership = await env.DB.prepare(
-    "UPDATE registered_phones SET owner_device_id = ?, updated_at = ? WHERE phone_hash = ?"
-  ).bind(row.requester_device_id, claimedAtSeconds, row.phone_hash).run();
-  if (!ownership.success || Number(ownership.meta?.changes || 0) !== 1) {
+  const claimedAt = nowIso();
+  const claimedAtSeconds = nowSeconds();
+  // Claim, transfer ownership, clear the old presence, and expire competing
+  // requests in one D1 batch. D1 rolls the batch back if a statement fails.
+  const [claimResult, ownershipResult] = await env.DB.batch([
+    env.DB.prepare(
+      "UPDATE pair_requests SET status = 'claimed', payload_json = NULL, claimed_at = ? WHERE request_id = ? AND phone_hash = ? AND status = 'approved' AND pair_code_hash = ? AND EXISTS (SELECT 1 FROM registered_phones WHERE phone_hash = ? AND owner_device_id = ?)"
+    ).bind(claimedAtSeconds, requestId, row.phone_hash, codeHash, row.phone_hash, stored.approverDeviceId),
+    env.DB.prepare(
+      "UPDATE registered_phones SET owner_device_id = ?, updated_at = ? WHERE phone_hash = ? AND owner_device_id = ?"
+    ).bind(row.requester_device_id, claimedAtSeconds, row.phone_hash, stored.approverDeviceId),
+    env.DB.prepare("DELETE FROM pair_presence WHERE phone_hash = ?").bind(row.phone_hash),
+    env.DB.prepare(
+      "UPDATE pair_requests SET status = 'expired' WHERE phone_hash = ? AND status IN ('pending','approved') AND request_id <> ?"
+    ).bind(row.phone_hash, requestId),
+  ]);
+  if (!claimResult.success || Number(claimResult.meta?.changes || 0) !== 1) {
+    return json({ ok: false, error: "code_already_claimed" }, 409);
+  }
+  if (!ownershipResult.success || Number(ownershipResult.meta?.changes || 0) !== 1) {
     return json({ ok: false, error: "account_transfer_failed" }, 500);
   }
-  await env.DB.prepare("DELETE FROM pair_presence WHERE phone_hash = ?").bind(row.phone_hash).run();
-  await env.DB.prepare(
-    "UPDATE pair_requests SET status = 'expired' WHERE phone_hash = ? AND status = 'pending' AND request_id <> ?"
-  ).bind(row.phone_hash, requestId).run();
 
   return json({
     ok: true,
@@ -521,6 +580,7 @@ export default {
       if (url.pathname === "/v1/pair/claim") return await claimPairing(request, env);
       if (url.pathname === "/v1/account/register") return await registerPhone(request, env);
       if (url.pathname === "/v1/account/status") return await accountStatus(request, env);
+      if (url.pathname === "/v1/account/logout") return await logoutPresence(request, env);
       if (url.pathname === "/v1/pair/presence") return await updatePresence(request, env);
       if (url.pathname === "/v1/pair/availability") return await checkPresence(request, env);
       if (url.pathname === "/v1/pair/request") return await requestPairing(request, env);
