@@ -15,9 +15,10 @@
 
     <application
         android:allowBackup="false"
-        android:label="ONAY Demo"
-        android:icon="@drawable/ic_launcher"
-        android:theme="@android:style/Theme.Material.Light.NoActionBar">
+        android:label="Onay"
+        android:icon="@mipmap/ic_launcher"
+        android:roundIcon="@mipmap/ic_launcher_round"
+        android:theme="@style/Theme.Onay">
         <activity
             android:name=".MainActivity"
             android:exported="true"
