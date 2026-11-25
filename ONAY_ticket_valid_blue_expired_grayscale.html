@@ -19610,5 +19610,127 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
 }
 </style>
 
+<style id="top-control-safe-area">
+/* Keep top-level controls below the Android/WebView status-area boundary. */
+:root {
+  --onay-top-control-offset: clamp(9px, 3cqw, 13px);
+}
+
+#cards-top-nav {
+  height: calc(55px + var(--onay-top-control-offset)) !important;
+  min-height: calc(55px + var(--onay-top-control-offset)) !important;
+  padding-top: var(--onay-top-control-offset) !important;
+  box-sizing: border-box !important;
+}
+
+#page-qr .qr-head,
+#page-qr .qr-tabs {
+  box-sizing: border-box !important;
+}
+#page-qr .qr-head {
+  height: calc(58px + var(--onay-top-control-offset)) !important;
+  min-height: calc(58px + var(--onay-top-control-offset)) !important;
+}
+#page-qr .qr-tabs {
+  height: calc(54px + var(--onay-top-control-offset)) !important;
+}
+#page-qr .qr-scan-instructions {
+  top: calc(clamp(44px, 7vh, 80px) + var(--onay-top-control-offset)) !important;
+}
+
+#page-notifications .notifications-header,
+#page-family .family-header,
+#page-transfer .transfer-head,
+#page-topup .topup-header,
+#page-codepay .service-header,
+#page-my-tickets .service-header,
+#page-history .history-header,
+#page-transport-result .transport-result-header,
+#page-trial-thread .trial-header,
+#page-menu .menu-page-header,
+#page-life .life-header {
+  box-sizing: border-box !important;
+  padding-top: var(--onay-top-control-offset) !important;
+}
+
+#page-notifications .notifications-header {
+  height: calc(64px + var(--onay-top-control-offset)) !important;
+}
+#page-family .family-header {
+  height: calc(58px + var(--onay-top-control-offset)) !important;
+  min-height: calc(58px + var(--onay-top-control-offset)) !important;
+  flex-basis: calc(58px + var(--onay-top-control-offset)) !important;
+}
+#page-transfer .transfer-head {
+  height: calc(13.98cqw + var(--onay-top-control-offset)) !important;
+  min-height: calc(13.98cqw + var(--onay-top-control-offset)) !important;
+}
+#page-topup .topup-header,
+#page-codepay .service-header,
+#page-my-tickets .service-header {
+  height: calc(13.8cqw + var(--onay-top-control-offset)) !important;
+  min-height: calc(13.8cqw + var(--onay-top-control-offset)) !important;
+}
+#page-codepay .service-header {
+  height: calc(11.44cqw + var(--onay-top-control-offset)) !important;
+  min-height: calc(11.44cqw + var(--onay-top-control-offset)) !important;
+}
+#page-history .history-header,
+#page-transport-result .transport-result-header,
+#page-trial-thread .trial-header {
+  height: calc(13.8cqw + var(--onay-top-control-offset)) !important;
+  min-height: calc(13.8cqw + var(--onay-top-control-offset)) !important;
+}
+#page-menu .menu-page-header {
+  height: calc(13.3cqw + var(--onay-top-control-offset)) !important;
+}
+#page-life .life-header {
+  height: calc(15.2cqw + var(--onay-top-control-offset)) !important;
+  min-height: calc(15.2cqw + var(--onay-top-control-offset)) !important;
+}
+
+@media (max-height: 680px) {
+  :root { --onay-top-control-offset: 8px; }
+}
+</style>
+
+<style id="bottom-navigation-safe-area">
+/* Keep the five main actions close to the bottom while respecting the
+   iPhone home-indicator area. Android's native host removes its navigation
+   inset from the WebView viewport before this rule is applied. */
+:root {
+  --onay-nav-edge-gap: clamp(3px, 0.8cqw, 5px);
+}
+
+#page-main,
+#page-routes,
+#page-menu,
+#page-life {
+  --nav-bottom: max(var(--onay-nav-edge-gap), env(safe-area-inset-bottom, 0px));
+}
+
+#page-routes .route-bottom-nav,
+#page-menu .menu-bottom-bar,
+#page-life .life-bottom-bar {
+  margin-bottom: var(--nav-bottom) !important;
+}
+
+#page-main .onay-bottom-bar {
+  bottom: var(--nav-bottom) !important;
+}
+
+/* The centre QR action follows the same baseline as the other four actions. */
+#page-main .onay-bottom-action,
+#page-routes .route-bottom-button,
+#page-menu .onay-bottom-action,
+#page-life .onay-bottom-action {
+  transform: translateY(clamp(1px, 0.35cqw, 2px));
+}
+
+@media (max-height: 680px) {
+  :root { --onay-nav-edge-gap: 3px; }
+}
+</style>
+
 </body>
 </html>
