@@ -90,8 +90,8 @@ public class MainActivity extends FragmentActivity {
     private CameraManager cameraManager;
     private String torchCameraId;
     private int safeBottomInsetPx;
-    private static final long SPLASH_FIRST_STAGE_DURATION_MS = 650L;
-    private static final long SPLASH_MIN_DURATION_MS = 1300L;
+    private static final long SPLASH_FIRST_STAGE_DURATION_MS = 1400L;
+    private static final long SPLASH_MIN_DURATION_MS = 2500L;
     private View splashView;
     private View splashFirstStage;
     private View splashVersionStage;
@@ -236,7 +236,7 @@ public class MainActivity extends FragmentActivity {
 
     private View createSplashView() {
         FrameLayout splash = new FrameLayout(this);
-        splash.setBackgroundColor(Color.rgb(255, 214, 0));
+        splash.setBackgroundColor(Color.rgb(255, 216, 0));
         splash.setClickable(true);
 
         ImageView firstReferenceImage = new ImageView(this);
@@ -252,18 +252,16 @@ public class MainActivity extends FragmentActivity {
         splashVersionStage = versionReferenceImage;
         splash.addView(versionReferenceImage, new FrameLayout.LayoutParams(-1, -1));
 
-        FrameLayout.LayoutParams versionParams = new FrameLayout.LayoutParams(
-                dp(82), dp(30), Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
-        versionParams.bottomMargin = dp(42);
-
         // The supplied second reference image contains its sample version.
-        // Cover that sample with the same yellow and place the real APK
-        // version on top so the screen stays visually identical after updates.
+        // Cover the entire lower strip so the sample "v 3.6.5" embedded in
+        // the supplied image can never show through on another screen size.
         View versionPatch = new View(this);
-        versionPatch.setBackgroundColor(Color.rgb(255, 214, 0));
+        versionPatch.setBackgroundColor(Color.rgb(255, 216, 0));
         versionPatch.setAlpha(0f);
         splashVersionPatch = versionPatch;
-        splash.addView(versionPatch, versionParams);
+        FrameLayout.LayoutParams patchParams = new FrameLayout.LayoutParams(
+                -1, dp(180), Gravity.BOTTOM);
+        splash.addView(versionPatch, patchParams);
 
         TextView version = new TextView(this);
         version.setText("v " + getInstalledVersionName());
@@ -294,7 +292,7 @@ public class MainActivity extends FragmentActivity {
     }
 
     private void setSplashSystemBars(boolean splashVisible) {
-        int barColor = splashVisible ? Color.rgb(255, 214, 0) : Color.WHITE;
+        int barColor = splashVisible ? Color.rgb(255, 216, 0) : Color.WHITE;
         getWindow().setStatusBarColor(barColor);
         getWindow().setNavigationBarColor(barColor);
         int flags = View.SYSTEM_UI_FLAG_LAYOUT_STABLE;
