@@ -10,13 +10,19 @@ import android.hardware.camera2.CameraManager;
 import android.content.pm.PackageInfo;
 import android.content.pm.PackageManager;
 import android.content.pm.Signature;
+import android.graphics.Color;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.os.SystemClock;
 import android.provider.MediaStore;
 import android.provider.Settings;
+import android.util.TypedValue;
+import android.view.Gravity;
+import android.view.View;
+import android.view.ViewGroup;
 import android.webkit.JavascriptInterface;
 import android.webkit.PermissionRequest;
 import android.webkit.ValueCallback;
@@ -25,6 +31,8 @@ import android.webkit.WebResourceRequest;
 import android.webkit.WebSettings;
 import android.webkit.WebView;
 import android.widget.FrameLayout;
+import android.widget.ImageView;
+import android.widget.TextView;
 import android.widget.Toast;
 
 import androidx.biometric.BiometricManager;
@@ -82,6 +90,12 @@ public class MainActivity extends FragmentActivity {
     private CameraManager cameraManager;
     private String torchCameraId;
     private int safeBottomInsetPx;
+    private static final long SPLASH_MIN_DURATION_MS = 1000L;
+    private View splashView;
+    private long splashStartedAt;
+    private boolean splashPageReady = false;
+    private boolean splashDismissScheduled = false;
+    private boolean splashDismissed = false;
 
     @Override
     public void onCreate(Bundle state) {
@@ -151,6 +165,8 @@ public class MainActivity extends FragmentActivity {
                 if (url != null && url.startsWith("https://" + APP_ASSET_HOST + "/assets/")) {
                     installFastCameraDefaults(view);
                     syncNativeBottomInset();
+                    splashPageReady = true;
+                    scheduleSplashDismissal();
                 }
             }
         });
@@ -191,12 +207,98 @@ public class MainActivity extends FragmentActivity {
             }
         }, "OnayNative");
 
-        web.loadUrl("https://" + APP_ASSET_HOST + "/assets/index.html");
         root.addView(web, new FrameLayout.LayoutParams(-1, -1));
+
+        splashView = createSplashView();
+        splashStartedAt = SystemClock.uptimeMillis();
+        setSplashSystemBars(true);
+        root.addView(splashView, new FrameLayout.LayoutParams(-1, -1));
+        mainHandler.postDelayed(() -> {
+            // Do not leave the user on the splash if a WebView callback is
+            // interrupted by a device-specific startup issue.
+            splashPageReady = true;
+            scheduleSplashDismissal();
+        }, 5000L);
 
         setContentView(root);
         ViewCompat.requestApplyInsets(root);
+        web.loadUrl("https://" + APP_ASSET_HOST + "/assets/index.html");
         requestCameraPermissionOnEntry();
+    }
+
+    private View createSplashView() {
+        FrameLayout splash = new FrameLayout(this);
+        splash.setBackgroundColor(Color.rgb(255, 214, 0));
+        splash.setClickable(true);
+
+        ImageView referenceImage = new ImageView(this);
+        referenceImage.setImageResource(R.drawable.onay_splash_reference);
+        referenceImage.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        splash.addView(referenceImage, new FrameLayout.LayoutParams(-1, -1));
+
+        TextView version = new TextView(this);
+        version.setText("v " + getInstalledVersionName());
+        version.setTextColor(Color.rgb(25, 25, 25));
+        version.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
+        version.setGravity(Gravity.CENTER);
+        FrameLayout.LayoutParams versionParams = new FrameLayout.LayoutParams(
+                -2, -2, Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
+        versionParams.bottomMargin = dp(42);
+        splash.addView(version, versionParams);
+        return splash;
+    }
+
+    private int dp(int value) {
+        return Math.round(value * getResources().getDisplayMetrics().density);
+    }
+
+    private String getInstalledVersionName() {
+        try {
+            PackageInfo info = getPackageManager().getPackageInfo(getPackageName(), 0);
+            return info.versionName == null || info.versionName.trim().isEmpty()
+                    ? "1.0" : info.versionName;
+        } catch (Exception ignored) {
+            return "1.0";
+        }
+    }
+
+    private void setSplashSystemBars(boolean splashVisible) {
+        int barColor = splashVisible ? Color.rgb(255, 214, 0) : Color.WHITE;
+        getWindow().setStatusBarColor(barColor);
+        getWindow().setNavigationBarColor(barColor);
+        int flags = View.SYSTEM_UI_FLAG_LAYOUT_STABLE;
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            flags |= View.SYSTEM_UI_FLAG_LIGHT_STATUS_BAR;
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            flags |= View.SYSTEM_UI_FLAG_LIGHT_NAVIGATION_BAR;
+        }
+        getWindow().getDecorView().setSystemUiVisibility(flags);
+    }
+
+    private void scheduleSplashDismissal() {
+        if (!splashPageReady || splashView == null || splashDismissed
+                || splashDismissScheduled) return;
+        long remaining = splashStartedAt + SPLASH_MIN_DURATION_MS
+                - SystemClock.uptimeMillis();
+        if (remaining > 0) {
+            splashDismissScheduled = true;
+            mainHandler.postDelayed(() -> {
+                splashDismissScheduled = false;
+                scheduleSplashDismissal();
+            }, remaining);
+            return;
+        }
+
+        splashDismissed = true;
+        View view = splashView;
+        view.animate().alpha(0f).setDuration(180L).withEndAction(() -> {
+            if (view.getParent() instanceof ViewGroup) {
+                ((ViewGroup) view.getParent()).removeView(view);
+            }
+            if (splashView == view) splashView = null;
+            setSplashSystemBars(false);
+        }).start();
     }
 
     private void syncNativeBottomInset() {
@@ -208,16 +310,25 @@ public class MainActivity extends FragmentActivity {
         web.evaluateJavascript(script, null);
     }
 
-    private boolean canUseBiometric() {
+    private int getAllowedAuthenticators() {
         int authenticators = BiometricManager.Authenticators.BIOMETRIC_WEAK;
-        return BiometricManager.from(this).canAuthenticate(authenticators)
+        // Android 9+ can also use the phone's PIN, pattern, or password.
+        // Older Android versions keep the biometric-only path for compatibility.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            authenticators |= BiometricManager.Authenticators.DEVICE_CREDENTIAL;
+        }
+        return authenticators;
+    }
+
+    private boolean canUseBiometric() {
+        return BiometricManager.from(this).canAuthenticate(getAllowedAuthenticators())
                 == BiometricManager.BIOMETRIC_SUCCESS;
     }
 
     private void authenticateWithBiometric() {
         if (!canUseBiometric()) {
             dispatchBiometricResult(false,
-                    "Бұл құрылғыда саусақ ізі немесе Face ID бапталмаған. PIN-кодты енгізіңіз.");
+                    "Телефонда саусақ ізі, Face ID немесе экран құлпы бапталмаған. Қолданба PIN-кодын енгізіңіз.");
             return;
         }
 
@@ -234,17 +345,21 @@ public class MainActivity extends FragmentActivity {
                     public void onAuthenticationError(int errorCode,
                             CharSequence errString) {
                         dispatchBiometricResult(false,
-                                "Биометрия расталмады. PIN-кодты енгізіңіз.");
+                                "Биометрия немесе телефон құлпы расталмады. Қолданба PIN-кодын енгізіңіз.");
                     }
                 });
 
-        BiometricPrompt.PromptInfo promptInfo = new BiometricPrompt.PromptInfo.Builder()
-                .setTitle("ONAY қолданбасын ашу")
-                .setSubtitle("Саусақ ізімен немесе Face ID арқылы растаңыз")
-                .setAllowedAuthenticators(BiometricManager.Authenticators.BIOMETRIC_WEAK)
-                .setNegativeButtonText("PIN-кодпен кіру")
-                .build();
-        prompt.authenticate(promptInfo);
+        int allowedAuthenticators = getAllowedAuthenticators();
+        BiometricPrompt.PromptInfo.Builder promptBuilder =
+                new BiometricPrompt.PromptInfo.Builder()
+                        .setTitle("ONAY қолданбасын ашу")
+                        .setSubtitle("Саусақ ізі, Face ID немесе телефон құлпы арқылы растаңыз")
+                        .setAllowedAuthenticators(allowedAuthenticators);
+        // Device credential replaces the negative button in the system prompt.
+        if ((allowedAuthenticators & BiometricManager.Authenticators.DEVICE_CREDENTIAL) == 0) {
+            promptBuilder.setNegativeButtonText("Қолданба PIN-кодымен кіру");
+        }
+        prompt.authenticate(promptBuilder.build());
     }
 
     private void dispatchBiometricResult(boolean success, String message) {
