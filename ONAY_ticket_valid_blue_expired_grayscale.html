@@ -18553,6 +18553,7 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
     const AUTH_STORE_KEY='onay-virtual-child-accounts-demo-v1';
     const AUTH_PENDING_PHONE_KEY='onay-registration-pending-phone-v1';
     const AUTH_LAST_PHONE_KEY='onay-demo-last-registered-phone-v1';
+    const AUTH_LAST_PROFILE_KEY='onay-demo-last-profile-v1';
     let authPendingPhone=sessionStorage.getItem(AUTH_PENDING_PHONE_KEY)||'',authDraftPhoto='',authDraftPhotoWidth=0,authDraftPhotoHeight=0,authUploadedPhotoPath='',authCameraStream=null,authQualityCheckTimer=null,authQualityCanvas=null,authLastFramePixels=null,authStableFrames=0,authLatestExposureOK=false,authFaceDetector=null,authFaceCheckBusy=false,authFaceLastOK=true,authFaceCheckAt=0,authDraftProfile=null,authBusy=false,authPinInputBlocked=false,authPinResetTimer=null;
     let authAfterLogoutPin=false;
     function authLoadAccounts(){
@@ -18563,9 +18564,31 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
       try{localStorage.setItem(AUTH_STORE_KEY,JSON.stringify(value));return true;}
       catch(_){authSetError('Бұл браузерде орын жеткіліксіз. Камера фотосын кішірейтіп қайта көріңіз.');return false;}
     }
+    function authUsableProfile(profile){
+      return !!profile&&typeof profile==='object'&&!!(profile.name||profile.firstName||profile.surname||profile.birthDate||profile.photo?.dataUrl);
+    }
+    function authLastProfile(phone){
+      const digits=authDigits(phone);if(digits.length!==10)return null;
+      try{
+        const map=JSON.parse(localStorage.getItem(AUTH_LAST_PROFILE_KEY)||'{}');
+        return authUsableProfile(map?.[digits])?map[digits]:null;
+      }catch(_){return null;}
+    }
+    function authRememberLastProfile(phone,profile){
+      const digits=authDigits(phone);if(digits.length!==10||!authUsableProfile(profile))return;
+      try{
+        const map=JSON.parse(localStorage.getItem(AUTH_LAST_PROFILE_KEY)||'{}');
+        map[digits]=profile;localStorage.setItem(AUTH_LAST_PROFILE_KEY,JSON.stringify(map));
+      }catch(_){}
+    }
+    function authAccountWithLastProfile(phone,account){
+      if(!account||authUsableProfile(account.profile))return account;
+      const profile=authLastProfile(phone);
+      return profile?{...account,profile}:account;
+    }
     function authLastRegisteredPhone(){
       const accounts=authLoadAccounts();
-      const valid=phone=>/^\d{10}$/.test(String(phone||''))&&!!accounts[phone]?.pinSalt&&!!accounts[phone]?.pinHash&&!!accounts[phone]?.profile;
+      const valid=phone=>/^\d{10}$/.test(String(phone||''))&&!!accounts[phone]?.pinSalt&&!!accounts[phone]?.pinHash&&!!authAccountWithLastProfile(phone,accounts[phone])?.profile;
       let saved='';try{saved=localStorage.getItem(AUTH_LAST_PHONE_KEY)||'';}catch(_){}
       if(valid(saved))return saved;
       const pending=String(sessionStorage.getItem(AUTH_PENDING_PHONE_KEY)||'');
@@ -18659,8 +18682,8 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
     function authSubmitPhone(){
       if(authBusy)return;const input=el('auth-phone-input');const digits=authDigits(input?.value);
       if(digits.length!==10){authSetError('Қазақстан нөмірінің 10 цифрын толық енгізіңіз.');return;}
-      authPendingPhone=digits;sessionStorage.setItem(AUTH_PENDING_PHONE_KEY,digits);const account=authLoadAccounts()[digits];
-      if(account?.pinHash&&account?.profile){authRememberLastPhone(digits);authRender('login-pin',{phone:digits});return;}
+      authPendingPhone=digits;sessionStorage.setItem(AUTH_PENDING_PHONE_KEY,digits);const accounts=authLoadAccounts();const account=authAccountWithLastProfile(digits,accounts[digits]);
+      if(account?.pinHash&&account?.profile){if(!accounts[digits]?.profile){accounts[digits]=account;authSaveAccounts(accounts);}authRememberLastProfile(digits,account.profile);authRememberLastPhone(digits);authRender('login-pin',{phone:digits});return;}
       authDraftPhoto='';authDraftPhotoWidth=0;authDraftPhotoHeight=0;authUploadedPhotoPath='';authDraftProfile=null;authRender('camera-consent');
     }
     window.onayPrepareRemoteAccountLogin=function(phone){
@@ -18668,6 +18691,7 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
       authPendingPhone=digits;try{sessionStorage.setItem(AUTH_PENDING_PHONE_KEY,digits);}catch(_){ }
       authSetError('');authRender('login-pin',{phone:digits});
     };
+    window.onayGetLastProfile=function(phone){return authLastProfile(phone);};
     async function authPinHash(pin,salt,iterations=150000){
       if(!window.crypto?.subtle||!window.crypto?.getRandomValues)throw new Error('Қауіпсіз PIN сақтау үшін HTTPS немесе localhost қажет.');
       const key=await crypto.subtle.importKey('raw',new TextEncoder().encode(pin),'PBKDF2',false,['deriveBits']);
@@ -18836,6 +18860,7 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
         const account={phoneDigits:authPendingPhone,pinSalt:authToBase64(salt),pinHash:authToBase64(hash),serverPinSalt:authToBase64(salt),serverPinHash:authToBase64(serverHash),serverPinIterations:100000,profile:authDraftProfile,createdAt:new Date().toISOString()};
         const accounts=authLoadAccounts();accounts[authPendingPhone]=account;
         if(!authSaveAccounts(accounts))return;
+        authRememberLastProfile(authPendingPhone,account.profile);
         authRememberLastPhone(authPendingPhone);
         // Тіркелген аккаунтты сақтағаннан кейін қолданбаны бірден ашпай,
         // бұрынғыдай PIN/құпиясөз енгізу бетіне өткіземіз.
@@ -19010,7 +19035,7 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
     }
     async function authLogin(){
       if(authBusy)return;const pin=String(el('auth-login-pin')?.value||'');if(!/^\d{4}$/.test(pin)){authSetError('4 таңбалы PIN-кодты енгізіңіз.');return;}
-      const account=authLoadAccounts()[authPendingPhone];if(!account?.pinSalt||!account?.pinHash){authRender('phone');authSetError('Аккаунт табылмады. Нөмірді қайта тексеріңіз.');return;}
+      const accounts=authLoadAccounts();const account=authAccountWithLastProfile(authPendingPhone,accounts[authPendingPhone]);if(!account?.pinSalt||!account?.pinHash||!account?.profile){authRender('phone');authSetError('Аккаунт табылмады. Нөмірді қайта тексеріңіз.');return;}
       authBusy=true;try{
         const candidate=await authPinHash(pin,authFromBase64(account.pinSalt));const expected=authFromBase64(account.pinHash);
         const matches=candidate.length===expected.length&&candidate.every((value,index)=>value===expected[index]);
@@ -19024,13 +19049,15 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
           account.serverPinSalt=account.serverPinSalt||account.pinSalt;
           account.serverPinHash=authToBase64(await authPinHash(pin,authFromBase64(account.serverPinSalt),100000));
           account.serverPinIterations=100000;
-          const accounts=authLoadAccounts();accounts[authPendingPhone]=account;authSaveAccounts(accounts);
+          const accounts=authLoadAccounts();accounts[authPendingPhone]=account;authSaveAccounts(accounts);authRememberLastProfile(authPendingPhone,account.profile);
         }catch(_){ }
         authCompleteLogin(account);
       }catch(error){authSetError(error?.message||'Аккаунтқа кіру мүмкін болмады.');}
       finally{authBusy=false;}
     }
     function authApplyAccount(account){
+      account=authAccountWithLastProfile(account?.phoneDigits,account);
+      if(account?.profile)authRememberLastProfile(account.phoneDigits,account.profile);
       window.__onayDemoAccount=account;
       activeTrialPhoneDigits=String(account?.phoneDigits||'');
       trialLedger=loadTrialLedger();

@@ -76,6 +76,12 @@ function bytesEqual(left, right) {
   return difference === 0;
 }
 
+function usableProfile(profile) {
+  return !!profile
+    && typeof profile === "object"
+    && !!(profile.name || profile.firstName || profile.surname || profile.birthDate || profile.photo?.dataUrl);
+}
+
 async function derivePinHash(pin, salt) {
   const material = await crypto.subtle.importKey(
     "raw",
@@ -101,34 +107,40 @@ function accountSnapshot(body, phone) {
     || !account.pinHash
     || !account.serverPinHash
     || Number(account.serverPinIterations) !== PIN_HASH_ITERATIONS
-    || !account.profile
-    || typeof account.profile !== "object"
   ) return null;
+  const profile = usableProfile(account.profile)
+    ? account.profile
+    : usableProfile(body?.lastProfile) ? body.lastProfile : null;
+  if (!profile) return null;
+  const storedAccount = usableProfile(account.profile) ? account : { ...account, profile };
 
   const ledger = body?.ledger && typeof body.ledger === "object"
     ? body.ledger
     : { version: 1, balances: [], records: [], topups: [] };
   const favorites = Array.isArray(body?.favorites) ? body.favorites : [];
-  const accountJson = JSON.stringify(account);
+  const accountJson = JSON.stringify(storedAccount);
+  const profileJson = JSON.stringify(profile);
   const ledgerJson = JSON.stringify(ledger);
   const favoritesJson = JSON.stringify(favorites);
   if (
     accountJson.length > MAX_ACCOUNT_SNAPSHOT_LENGTH
+    || profileJson.length > MAX_ACCOUNT_SNAPSHOT_LENGTH
     || ledgerJson.length > MAX_ACCOUNT_SNAPSHOT_LENGTH
     || favoritesJson.length > MAX_ACCOUNT_SNAPSHOT_LENGTH
-    || accountJson.length + ledgerJson.length + favoritesJson.length > MAX_ENCRYPTED_PAYLOAD_LENGTH
+    || accountJson.length + profileJson.length + ledgerJson.length + favoritesJson.length > MAX_ENCRYPTED_PAYLOAD_LENGTH
   ) return null;
-  return { accountJson, ledgerJson, favoritesJson };
+  return { accountJson, profileJson, ledgerJson, favoritesJson };
 }
 
 async function upsertAccountSnapshot(env, phoneHash, snapshot, now) {
   await env.DB.prepare(
-    `INSERT INTO account_snapshots(phone_hash, account_json, ledger_json, favorites_json, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?)
+    `INSERT INTO account_snapshots(phone_hash, account_json, profile_json, ledger_json, favorites_json, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(phone_hash) DO UPDATE SET account_json = excluded.account_json,
-       ledger_json = excluded.ledger_json, favorites_json = excluded.favorites_json,
+       profile_json = excluded.profile_json, ledger_json = excluded.ledger_json,
+       favorites_json = excluded.favorites_json,
        updated_at = excluded.updated_at`
-  ).bind(phoneHash, snapshot.accountJson, snapshot.ledgerJson, snapshot.favoritesJson, now, now).run();
+  ).bind(phoneHash, snapshot.accountJson, snapshot.profileJson, snapshot.ledgerJson, snapshot.favoritesJson, now, now).run();
 }
 
 async function rateLimit(env, key, limit, windowSeconds) {
@@ -255,7 +267,7 @@ async function accountLogin(request, env) {
 
   const phoneHash = await sha256Hex(phone);
   const row = await env.DB.prepare(
-    "SELECT account_json, ledger_json, favorites_json FROM account_snapshots WHERE phone_hash = ?"
+    "SELECT account_json, profile_json, ledger_json, favorites_json FROM account_snapshots WHERE phone_hash = ?"
   ).bind(phoneHash).first();
   if (!row) return json({ ok: false, error: "account_not_synced" }, 404);
 
@@ -264,6 +276,9 @@ async function accountLogin(request, env) {
   let favorites;
   try {
     account = JSON.parse(String(row.account_json || ""));
+    const savedProfile = JSON.parse(String(row.profile_json || "{}"));
+    if (!usableProfile(account.profile) && usableProfile(savedProfile)) account.profile = savedProfile;
+    if (!usableProfile(account.profile)) return json({ ok: false, error: "account_snapshot_invalid" }, 500);
     ledger = JSON.parse(String(row.ledger_json || "{}"));
     favorites = JSON.parse(String(row.favorites_json || "[]"));
     const salt = base64Bytes(account.serverPinSalt || account.pinSalt);
