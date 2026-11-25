@@ -16704,6 +16704,7 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
          if(favoriteRouteNumbers.includes(key))favoriteRouteNumbers=favoriteRouteNumbers.filter(x=>x!==key);
          else favoriteRouteNumbers.push(key);
          try{localStorage.setItem('onay-demo-favorite-routes',JSON.stringify(favoriteRouteNumbers));}catch(_){}
+         try{if(typeof window.onaySyncAccountSnapshot==='function')window.onaySyncAccountSnapshot();}catch(_){}
          hideRouteDetail();renderRoutes();showToast('Таңдаулылар жаңартылды');
       };
       el('route-detail-overlay').hidden=false;
@@ -18051,7 +18052,7 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
     const EMPTY_TRIAL_PROFILE=Object.freeze({name:'',birthDate:'',category:'Виртуалды балалар картасы',validUntil:'',photo:null});
     let trialProfile={...EMPTY_TRIAL_PROFILE};
     let trialIntent=null,trialIssueBusy=false,trialActiveTicketId=null,trialDetailReturnFocus=null;
-    function persistTrialLedger(next){try{localStorage.setItem(trialLedgerStorageKey(),JSON.stringify(next));trialLedger=next;return true;}catch(_){showToast('Браузерде сақтау мүмкін болмады. Бос орын мен сайт рұқсатын тексеріңіз.');return false;}}
+    function persistTrialLedger(next){try{localStorage.setItem(trialLedgerStorageKey(),JSON.stringify(next));trialLedger=next;try{if(typeof window.onaySyncAccountSnapshot==='function')window.onaySyncAccountSnapshot();}catch(_){}return true;}catch(_){showToast('Браузерде сақтау мүмкін болмады. Бос орын мен сайт рұқсатын тексеріңіз.');return false;}}
     function trialDateParts(value){return Object.fromEntries(new Intl.DateTimeFormat('en-GB',{timeZone:'Asia/Almaty',year:'numeric',month:'2-digit',day:'2-digit',hour:'2-digit',minute:'2-digit',hourCycle:'h23'}).formatToParts(new Date(value)).filter(p=>p.type!=='literal').map(p=>[p.type,p.value]));}
     function trialDateKey(value){const p=trialDateParts(value);return `${p.year}-${p.month}-${p.day}`;}
     function trialDateText(value){const p=trialDateParts(value);return `${p.day}.${p.month}.${p.year}`;}
@@ -18546,8 +18547,9 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
     }
     buildLifeNavigation();
 
-    // Тіркелу және жергілікті демонстрациялық аккаунт.
-    // Нақты SMS/ONAY растауы емес: мәліметтер осы браузердің localStorage қоймасында қалады.
+    // Тіркелу және сервермен синхрондалатын демонстрациялық аккаунт.
+    // PIN хэші мен профиль серверде snapshot ретінде сақталады, ал браузерде
+    // жылдам ашу үшін кэш қалады. Қайта орнатқанда телефон + PIN жеткілікті.
     const AUTH_STORE_KEY='onay-virtual-child-accounts-demo-v1';
     const AUTH_PENDING_PHONE_KEY='onay-registration-pending-phone-v1';
     const AUTH_LAST_PHONE_KEY='onay-demo-last-registered-phone-v1';
@@ -18620,13 +18622,13 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
         host.innerHTML=panel(`<p class="auth-step-kicker">Аккаунтқа кіру</p><h1>Қош келдіңіз!</h1><p class="auth-description">Телефон нөміріңізді енгізіңіз. Бұрын тіркелген болсаңыз, өз аккаунтыңызға кіресіз.</p><label class="auth-label" for="auth-phone-input">Телефон нөмірі</label><div class="auth-input-wrap"><span class="auth-prefix">+7</span><input class="auth-input" id="auth-phone-input" type="tel" inputmode="numeric" autocomplete="tel-national" maxlength="14" placeholder="702 000 00 60" value="${formattedPhone}" oninput="authFormatPhone(this)"></div><p class="auth-error" id="auth-error" role="alert"></p><button class="auth-primary" type="button" onclick="authSubmitPhone()">Жалғастыру</button><div class="auth-note">Жаңа аккаунт жасау үшін баланың фотосын камерамен түсіріп, аты-жөні мен туған күнін енгізу қажет.</div>`);
         if(!savedPhone)setTimeout(()=>el('auth-phone-input')?.focus({preventScroll:true}),30);
       }else if(stage==='camera-consent'){
-        host.innerHTML=panel(`<p class="auth-step-kicker">Тіркелу · 1/3</p><h1>Телефон камерасымен фото түсіру</h1><p class="auth-description">«Камераны ашу» батырмасын басқанда телефонның өзінің камера қолданбасы ашылады. Фото түсіріп, растаған соң сурет осы сайтқа қайтып келеді.</p><label class="auth-consent"><input id="auth-guardian-consent" type="checkbox" onchange="el('auth-camera-start').disabled=!this.checked"><span>Мен заңды өкілдің келісімі бар екенін растаймын.</span></label><div class="auth-note">Тек өзіңіздің немесе заңды рұқсат берілген сынақ фотосын пайдаланыңыз. Түсірілген фото осы сайттың тіркеу бетіне қайтып келеді де, профильмен бірге осы браузерде сақталады.</div><input id="auth-native-camera-input" type="file" accept="image/*" capture="user" hidden onchange="authNativePhotoSelected(this)"><p class="auth-error" id="auth-error" role="alert"></p><button class="auth-primary" id="auth-camera-start" type="button" disabled onclick="authStartCamera()">Телефон камерасын ашу</button><button class="auth-link" type="button" onclick="authRender('phone')">Артқа</button>`);
+        host.innerHTML=panel(`<p class="auth-step-kicker">Тіркелу · 1/3</p><h1>Телефон камерасымен фото түсіру</h1><p class="auth-description">«Камераны ашу» батырмасын басқанда телефонның өзінің камера қолданбасы ашылады. Фото түсіріп, растаған соң сурет осы сайтқа қайтып келеді.</p><label class="auth-consent"><input id="auth-guardian-consent" type="checkbox" onchange="el('auth-camera-start').disabled=!this.checked"><span>Мен заңды өкілдің келісімі бар екенін растаймын.</span></label><div class="auth-note">Тек өзіңіздің немесе заңды рұқсат берілген сынақ фотосын пайдаланыңыз. Түсірілген фото профильмен бірге қауіпсіз серверлік snapshot-қа сақталады.</div><input id="auth-native-camera-input" type="file" accept="image/*" capture="user" hidden onchange="authNativePhotoSelected(this)"><p class="auth-error" id="auth-error" role="alert"></p><button class="auth-primary" id="auth-camera-start" type="button" disabled onclick="authStartCamera()">Телефон камерасын ашу</button><button class="auth-link" type="button" onclick="authRender('phone')">Артқа</button>`);
       }else if(stage==='camera'){
         host.innerHTML=panel(`<p class="auth-step-kicker">Тіркелу · 1/3</p><h1>Бетіңізді кадрға орналастырыңыз</h1><p class="auth-description">Артқы негізгі камера қолданылады: көрініс айна сияқты аударылмайды, оң қолыңыз кадрда өз орнына сәйкес көрінеді. Бетіңізді сопақ контурдың ортасына қойып, телефонды қозғалмай ұстаңыз. Қатты жарық, қараңғылық немесе бұлыңғыр кадр болса, фото түсіру бұғатталады.</p><div class="auth-camera-frame"><video id="auth-camera-video" autoplay muted playsinline></video><div class="auth-camera-guide"></div></div><p class="auth-camera-message" id="auth-camera-status">Камера қосылып жатыр…</p><p class="auth-camera-message" id="auth-camera-quality" aria-live="polite">Жарық пен кадр тұрақтылығы тексеріледі.</p><p class="auth-note">Фото автоматты түсірілмейді. Сапа талаптары орындалғанда «Фото түсіру» батырмасын өзіңіз басыңыз. Қатты жарықта, қараңғыда немесе қозғалыс кезінде түсіру мүмкін емес.</p><p class="auth-error" id="auth-error" role="alert"></p><button class="auth-primary" id="auth-capture-button" type="button" disabled onclick="authCapturePhoto()">Фото түсіру</button><button class="auth-link" type="button" onclick="authStopCamera();authRender('camera-consent')">Артқа</button><canvas id="auth-camera-canvas" hidden></canvas>`);
       }else if(stage==='details'){
         host.innerHTML=panel(`<p class="auth-step-kicker">Тіркелу · 2/3</p><h1>Жеке мәліметтер</h1><p class="auth-description">Картада көрсетілетін мәліметтерді енгізіңіз.</p><div class="auth-photo-top"><img class="auth-preview" src="${authDraftPhoto}" alt="Камерамен түсірілген фото"><span class="auth-note">Фото сайтқа жүктелді</span></div><label class="auth-label" for="auth-surname">Фамилия</label><input class="auth-field" id="auth-surname" type="text" maxlength="50" autocomplete="family-name" placeholder="Фамилия"><label class="auth-label" for="auth-firstname">Имя</label><input class="auth-field" id="auth-firstname" type="text" maxlength="50" autocomplete="given-name" placeholder="Имя"><label class="auth-label" for="auth-birthdate">Туған күні</label><input class="auth-field" id="auth-birthdate" type="date" max="${new Date().toISOString().slice(0,10)}"><p class="auth-error" id="auth-error" role="alert"></p><button class="auth-primary" type="button" onclick="authConfirmDetails()">Растау</button><button class="auth-link" type="button" onclick="authRetakePhoto()">Фотоны қайта түсіру</button>`);
       }else if(stage==='create-pin'){
-        host.innerHTML=panel(`<p class="auth-step-kicker">Тіркелу · 3/3</p><h1>Құпиясөз ойлап табыңыз</h1><p class="auth-description">Аккаунтқа қайта кіру үшін 4 саннан тұратын PIN-код орнатыңыз.</p><div class="auth-pin-fields"><div><label class="auth-label" for="auth-pin-one">Құпиясөз</label><input class="auth-field" id="auth-pin-one" type="password" inputmode="numeric" autocomplete="new-password" maxlength="4" placeholder="••••"></div><div><label class="auth-label" for="auth-pin-two">Қайталаңыз</label><input class="auth-field" id="auth-pin-two" type="password" inputmode="numeric" autocomplete="new-password" maxlength="4" placeholder="••••"></div></div><p class="auth-error" id="auth-error" role="alert"></p><button class="auth-primary" type="button" onclick="authFinishRegistration()">Тіркелуді аяқтау</button><div class="auth-note">PIN-код тек осы браузердегі демонстрациялық аккаунтқа арналған.</div>`);
+        host.innerHTML=panel(`<p class="auth-step-kicker">Тіркелу · 3/3</p><h1>Құпиясөз ойлап табыңыз</h1><p class="auth-description">Аккаунтқа қайта кіру үшін 4 саннан тұратын PIN-код орнатыңыз.</p><div class="auth-pin-fields"><div><label class="auth-label" for="auth-pin-one">Құпиясөз</label><input class="auth-field" id="auth-pin-one" type="password" inputmode="numeric" autocomplete="new-password" maxlength="4" placeholder="••••"></div><div><label class="auth-label" for="auth-pin-two">Қайталаңыз</label><input class="auth-field" id="auth-pin-two" type="password" inputmode="numeric" autocomplete="new-password" maxlength="4" placeholder="••••"></div></div><p class="auth-error" id="auth-error" role="alert"></p><button class="auth-primary" type="button" onclick="authFinishRegistration()">Тіркелуді аяқтау</button><div class="auth-note">PIN-код аккаунтты басқа телефонда да қалпына келтіруге мүмкіндік береді.</div>`);
       }else if(stage==='login-pin'){
         authPinInputBlocked=false;clearTimeout(authPinResetTimer);
         host.innerHTML=`<section class="auth-pin-screen" aria-label="4 таңбалы демо PIN-код">
@@ -18661,10 +18663,15 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
       if(account?.pinHash&&account?.profile){authRememberLastPhone(digits);authRender('login-pin',{phone:digits});return;}
       authDraftPhoto='';authDraftPhotoWidth=0;authDraftPhotoHeight=0;authUploadedPhotoPath='';authDraftProfile=null;authRender('camera-consent');
     }
-    async function authPinHash(pin,salt){
+    window.onayPrepareRemoteAccountLogin=function(phone){
+      const digits=authDigits(phone);if(digits.length!==10)return;
+      authPendingPhone=digits;try{sessionStorage.setItem(AUTH_PENDING_PHONE_KEY,digits);}catch(_){ }
+      authSetError('');authRender('login-pin',{phone:digits});
+    };
+    async function authPinHash(pin,salt,iterations=150000){
       if(!window.crypto?.subtle||!window.crypto?.getRandomValues)throw new Error('Қауіпсіз PIN сақтау үшін HTTPS немесе localhost қажет.');
       const key=await crypto.subtle.importKey('raw',new TextEncoder().encode(pin),'PBKDF2',false,['deriveBits']);
-      const bits=await crypto.subtle.deriveBits({name:'PBKDF2',salt,iterations:150000,hash:'SHA-256'},key,256);
+      const bits=await crypto.subtle.deriveBits({name:'PBKDF2',salt,iterations,hash:'SHA-256'},key,256);
       return new Uint8Array(bits);
     }
     function authToBase64(bytes){let binary='';for(const b of bytes)binary+=String.fromCharCode(b);return btoa(binary);}
@@ -18825,7 +18832,8 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
       if(!authDraftProfile||!authPendingPhone){authSetError('Тіркелу деректері толық емес.');return;}
       authBusy=true;try{
         const salt=crypto.getRandomValues(new Uint8Array(16));const hash=await authPinHash(pin,salt);
-        const account={phoneDigits:authPendingPhone,pinSalt:authToBase64(salt),pinHash:authToBase64(hash),profile:authDraftProfile,createdAt:new Date().toISOString()};
+        const serverHash=await authPinHash(pin,salt,100000);
+        const account={phoneDigits:authPendingPhone,pinSalt:authToBase64(salt),pinHash:authToBase64(hash),serverPinSalt:authToBase64(salt),serverPinHash:authToBase64(serverHash),serverPinIterations:100000,profile:authDraftProfile,createdAt:new Date().toISOString()};
         const accounts=authLoadAccounts();accounts[authPendingPhone]=account;
         if(!authSaveAccounts(accounts))return;
         authRememberLastPhone(authPendingPhone);
@@ -18998,6 +19006,7 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
         authRender('phone');return;
       }
       authApplyAccount(account);unlockAppPin();
+      try{if(typeof window.onaySyncAccountSnapshot==='function')window.onaySyncAccountSnapshot();}catch(_){ }
     }
     async function authLogin(){
       if(authBusy)return;const pin=String(el('auth-login-pin')?.value||'');if(!/^\d{4}$/.test(pin)){authSetError('4 таңбалы PIN-кодты енгізіңіз.');return;}
@@ -19011,6 +19020,12 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
           authPinResetTimer=setTimeout(()=>{const input=el('auth-login-pin');if(input)input.value='';authPinInputBlocked=false;authRenderPinDots(false);},600);
           return;
         }
+        try{
+          account.serverPinSalt=account.serverPinSalt||account.pinSalt;
+          account.serverPinHash=authToBase64(await authPinHash(pin,authFromBase64(account.serverPinSalt),100000));
+          account.serverPinIterations=100000;
+          const accounts=authLoadAccounts();accounts[authPendingPhone]=account;authSaveAccounts(accounts);
+        }catch(_){ }
         authCompleteLogin(account);
       }catch(error){authSetError(error?.message||'Аккаунтқа кіру мүмкін болмады.');}
       finally{authBusy=false;}

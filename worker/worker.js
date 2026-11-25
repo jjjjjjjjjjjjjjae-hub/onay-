@@ -8,6 +8,10 @@ const CORS_HEADERS = {
 const PAIRING_TTL_SECONDS = 10 * 60;
 const PRESENCE_TTL_SECONDS = 45;
 const MAX_ENCRYPTED_PAYLOAD_LENGTH = 4_000_000;
+const MAX_ACCOUNT_SNAPSHOT_LENGTH = 3_500_000;
+// Cloudflare Workers WebCrypto currently accepts PBKDF2 up to 100,000 rounds.
+// The browser keeps its stronger local 150,000-round hash separately.
+const PIN_HASH_ITERATIONS = 100_000;
 
 function json(body, status = 200, extraHeaders = {}) {
   return new Response(JSON.stringify(body), {
@@ -56,6 +60,75 @@ async function readJson(request) {
   } catch {
     return null;
   }
+}
+
+function base64Bytes(value) {
+  const raw = atob(String(value || ""));
+  const bytes = new Uint8Array(raw.length);
+  for (let index = 0; index < raw.length; index += 1) bytes[index] = raw.charCodeAt(index);
+  return bytes;
+}
+
+function bytesEqual(left, right) {
+  if (!left || !right || left.length !== right.length) return false;
+  let difference = 0;
+  for (let index = 0; index < left.length; index += 1) difference |= left[index] ^ right[index];
+  return difference === 0;
+}
+
+async function derivePinHash(pin, salt) {
+  const material = await crypto.subtle.importKey(
+    "raw",
+    new TextEncoder().encode(String(pin)),
+    "PBKDF2",
+    false,
+    ["deriveBits"]
+  );
+  const bits = await crypto.subtle.deriveBits(
+    { name: "PBKDF2", salt, iterations: PIN_HASH_ITERATIONS, hash: "SHA-256" },
+    material,
+    256
+  );
+  return new Uint8Array(bits);
+}
+
+function accountSnapshot(body, phone) {
+  const account = body?.account;
+  if (!account || typeof account !== "object") return null;
+  if (normalizePhone(account.phoneDigits) !== phone) return null;
+  if (
+    !account.pinSalt
+    || !account.pinHash
+    || !account.serverPinHash
+    || Number(account.serverPinIterations) !== PIN_HASH_ITERATIONS
+    || !account.profile
+    || typeof account.profile !== "object"
+  ) return null;
+
+  const ledger = body?.ledger && typeof body.ledger === "object"
+    ? body.ledger
+    : { version: 1, balances: [], records: [], topups: [] };
+  const favorites = Array.isArray(body?.favorites) ? body.favorites : [];
+  const accountJson = JSON.stringify(account);
+  const ledgerJson = JSON.stringify(ledger);
+  const favoritesJson = JSON.stringify(favorites);
+  if (
+    accountJson.length > MAX_ACCOUNT_SNAPSHOT_LENGTH
+    || ledgerJson.length > MAX_ACCOUNT_SNAPSHOT_LENGTH
+    || favoritesJson.length > MAX_ACCOUNT_SNAPSHOT_LENGTH
+    || accountJson.length + ledgerJson.length + favoritesJson.length > MAX_ENCRYPTED_PAYLOAD_LENGTH
+  ) return null;
+  return { accountJson, ledgerJson, favoritesJson };
+}
+
+async function upsertAccountSnapshot(env, phoneHash, snapshot, now) {
+  await env.DB.prepare(
+    `INSERT INTO account_snapshots(phone_hash, account_json, ledger_json, favorites_json, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?)
+     ON CONFLICT(phone_hash) DO UPDATE SET account_json = excluded.account_json,
+       ledger_json = excluded.ledger_json, favorites_json = excluded.favorites_json,
+       updated_at = excluded.updated_at`
+  ).bind(phoneHash, snapshot.accountJson, snapshot.ledgerJson, snapshot.favoritesJson, now, now).run();
 }
 
 async function rateLimit(env, key, limit, windowSeconds) {
@@ -127,6 +200,7 @@ async function registerPhone(request, env) {
 
   const phoneHash = await sha256Hex(phone);
   const now = nowSeconds();
+  const snapshot = accountSnapshot(body, phone);
   const existing = await env.DB.prepare(
     "SELECT owner_device_id FROM registered_phones WHERE phone_hash = ?"
   ).bind(phoneHash).first();
@@ -135,6 +209,7 @@ async function registerPhone(request, env) {
     await env.DB.prepare(
       "INSERT INTO registered_phones(phone_hash, owner_device_id, created_at, updated_at) VALUES (?, ?, ?, ?)"
     ).bind(phoneHash, deviceId, now, now).run();
+    if (snapshot) await upsertAccountSnapshot(env, phoneHash, snapshot, now);
     return json({ ok: true, registered: true, owner: true });
   }
 
@@ -143,8 +218,81 @@ async function registerPhone(request, env) {
     await env.DB.prepare(
       "UPDATE registered_phones SET updated_at = ? WHERE phone_hash = ?"
     ).bind(now, phoneHash).run();
+    if (snapshot) await upsertAccountSnapshot(env, phoneHash, snapshot, now);
   }
   return json({ ok: true, registered: true, owner });
+}
+
+async function accountSnapshotSave(request, env) {
+  const body = await readJson(request);
+  const phone = normalizePhone(body?.phone);
+  const deviceId = normalizeDeviceId(body?.deviceId);
+  if (phone.length < 10 || phone.length > 15 || deviceId.length < 8) {
+    return json({ ok: false, error: "invalid_registration" }, 400);
+  }
+
+  const registration = await phoneRegistrationStatus(env, phone);
+  if (!registration.registered) return json({ ok: false, error: "phone_not_registered" }, 404);
+  if (registration.ownerDeviceId !== deviceId) return json({ ok: false, error: "device_not_owner" }, 403);
+  const snapshot = accountSnapshot(body, phone);
+  if (!snapshot) return json({ ok: false, error: "invalid_account_snapshot" }, 400);
+  await upsertAccountSnapshot(env, registration.phoneHash, snapshot, nowSeconds());
+  return json({ ok: true, saved: true });
+}
+
+async function accountLogin(request, env) {
+  const body = await readJson(request);
+  const phone = normalizePhone(body?.phone);
+  const deviceId = normalizeDeviceId(body?.deviceId);
+  const pin = String(body?.pin || "");
+  if (phone.length < 10 || phone.length > 15 || deviceId.length < 8 || !/^\d{4}$/.test(pin)) {
+    return json({ ok: false, error: "invalid_login" }, 400);
+  }
+
+  const ip = request.headers.get("CF-Connecting-IP") || "unknown";
+  const allowed = await rateLimit(env, `login:${ip}:${await sha256Hex(phone)}`, 8, 900);
+  if (!allowed) return json({ ok: false, error: "rate_limited" }, 429);
+
+  const phoneHash = await sha256Hex(phone);
+  const row = await env.DB.prepare(
+    "SELECT account_json, ledger_json, favorites_json FROM account_snapshots WHERE phone_hash = ?"
+  ).bind(phoneHash).first();
+  if (!row) return json({ ok: false, error: "account_not_synced" }, 404);
+
+  let account;
+  let ledger;
+  let favorites;
+  try {
+    account = JSON.parse(String(row.account_json || ""));
+    ledger = JSON.parse(String(row.ledger_json || "{}"));
+    favorites = JSON.parse(String(row.favorites_json || "[]"));
+    const salt = base64Bytes(account.serverPinSalt || account.pinSalt);
+    const expected = base64Bytes(account.serverPinHash);
+    const candidate = await derivePinHash(pin, salt);
+    if (!bytesEqual(candidate, expected)) return json({ ok: false, error: "invalid_pin" }, 401);
+  } catch {
+    return json({ ok: false, error: "account_snapshot_invalid" }, 500);
+  }
+
+  const registration = await env.DB.prepare(
+    "SELECT owner_device_id FROM registered_phones WHERE phone_hash = ?"
+  ).bind(phoneHash).first();
+  const now = nowSeconds();
+  if (registration) {
+    await env.DB.batch([
+      env.DB.prepare("UPDATE registered_phones SET owner_device_id = ?, updated_at = ? WHERE phone_hash = ?")
+        .bind(deviceId, now, phoneHash),
+      env.DB.prepare("DELETE FROM pair_presence WHERE phone_hash = ?").bind(phoneHash),
+      env.DB.prepare("UPDATE pair_requests SET status = 'expired' WHERE phone_hash = ? AND status IN ('pending','approved')")
+        .bind(phoneHash),
+    ]);
+  } else {
+    await env.DB.prepare(
+      "INSERT INTO registered_phones(phone_hash, owner_device_id, created_at, updated_at) VALUES (?, ?, ?, ?)"
+    ).bind(phoneHash, deviceId, now, now).run();
+  }
+
+  return json({ ok: true, restored: true, account, ledger, favorites });
 }
 
 async function accountStatus(request, env) {
@@ -158,7 +306,11 @@ async function accountStatus(request, env) {
   const owner = status.registered
     && deviceId.length >= 8
     && status.ownerDeviceId === deviceId;
-  return json({ ok: true, registered: status.registered, online: status.online, owner });
+  const snapshot = status.registered
+    ? await env.DB.prepare("SELECT 1 AS present FROM account_snapshots WHERE phone_hash = ?")
+      .bind(status.phoneHash).first()
+    : null;
+  return json({ ok: true, registered: status.registered, online: status.online, owner, hasSnapshot: !!snapshot });
 }
 
 async function logoutPresence(request, env) {
@@ -579,6 +731,8 @@ export default {
       if (url.pathname === "/v1/pair/create") return await createPairing(request, env);
       if (url.pathname === "/v1/pair/claim") return await claimPairing(request, env);
       if (url.pathname === "/v1/account/register") return await registerPhone(request, env);
+      if (url.pathname === "/v1/account/login") return await accountLogin(request, env);
+      if (url.pathname === "/v1/account/snapshot") return await accountSnapshotSave(request, env);
       if (url.pathname === "/v1/account/status") return await accountStatus(request, env);
       if (url.pathname === "/v1/account/logout") return await logoutPresence(request, env);
       if (url.pathname === "/v1/pair/presence") return await updatePresence(request, env);
