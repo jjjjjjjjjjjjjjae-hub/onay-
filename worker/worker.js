@@ -12,6 +12,13 @@ const MAX_ACCOUNT_SNAPSHOT_LENGTH = 3_500_000;
 // Cloudflare Workers WebCrypto currently accepts PBKDF2 up to 100,000 rounds.
 // The browser keeps its stronger local 150,000-round hash separately.
 const PIN_HASH_ITERATIONS = 100_000;
+const LEGACY_RESET_MIGRATION_VERSION = "1.0.80";
+// These are the SHA-256 hashes of the two demo phone numbers that must be
+// cleared by the 1.0.80 migration. Raw phone numbers never live in the Worker.
+const LEGACY_RESET_PHONE_HASHES = new Set([
+  "1a66c4c60760314f9f6a12427da9493548ef4dbeb78ef7ba55a421872e9f2dd0",
+  "7c6abe80d0f375debd4b764e705037ffce7da4627f6c5afc5e8fa435bd4c7d50",
+]);
 
 function json(body, status = 200, extraHeaders = {}) {
   return new Response(JSON.stringify(body), {
@@ -260,6 +267,31 @@ async function registerPhone(request, env) {
     if (snapshot) await upsertAccountSnapshot(env, phoneHash, snapshot, now);
   }
   return json({ ok: true, registered: true, owner });
+}
+
+async function cleanupLegacyAccounts(request, env) {
+  const body = await readJson(request);
+  const phone = normalizePhone(body?.phone);
+  if (phone.length < 10 || phone.length > 15
+      || String(body?.migrationVersion || "") !== LEGACY_RESET_MIGRATION_VERSION) {
+    return json({ ok: false, error: "invalid_cleanup_request" }, 400);
+  }
+
+  const phoneHash = await sha256Hex(phone);
+  if (!LEGACY_RESET_PHONE_HASHES.has(phoneHash)) {
+    return json({ ok: false, error: "cleanup_not_allowed" }, 403);
+  }
+
+  await env.DB.batch([
+    env.DB.prepare("DELETE FROM pair_presence WHERE phone_hash = ?").bind(phoneHash),
+    env.DB.prepare("DELETE FROM pair_requests WHERE phone_hash = ?").bind(phoneHash),
+    env.DB.prepare("DELETE FROM device_pairings WHERE phone_hash = ?").bind(phoneHash),
+    env.DB.prepare("DELETE FROM onay_sync_devices WHERE phone_hash = ?").bind(phoneHash),
+    env.DB.prepare("DELETE FROM account_snapshots WHERE phone_hash = ?").bind(phoneHash),
+    env.DB.prepare("DELETE FROM registered_phones WHERE phone_hash = ?").bind(phoneHash),
+    env.DB.prepare("DELETE FROM pair_rate_limits WHERE substr(rate_key, -64) = ?").bind(phoneHash),
+  ]);
+  return json({ ok: true, cleaned: true });
 }
 
 async function accountSnapshotSave(request, env) {
@@ -773,6 +805,7 @@ export default {
       if (url.pathname === "/v1/pair/create") return await createPairing(request, env);
       if (url.pathname === "/v1/pair/claim") return await claimPairing(request, env);
       if (url.pathname === "/v1/account/register") return await registerPhone(request, env);
+      if (url.pathname === "/v1/account/cleanup-legacy") return await cleanupLegacyAccounts(request, env);
       if (url.pathname === "/v1/account/login") return await accountLogin(request, env);
       if (url.pathname === "/v1/account/snapshot") return await accountSnapshotSave(request, env);
       if (url.pathname === "/v1/account/status") return await accountStatus(request, env);
