@@ -17494,7 +17494,7 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
       }
       const id=++qrCameraRequestId;
       qrCameraStarting=true;
-      qrCameraMessage('Камераға рұқсат беріңіз. Chrome сұраса, «Рұқсат ету» батырмасын басыңыз.',false);
+      hideQrCameraMessage();
       let stream;
       try {
         try {
