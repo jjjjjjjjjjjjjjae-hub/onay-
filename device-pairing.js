@@ -148,12 +148,21 @@
     var account=accounts[digits]||null;
     try{return account?JSON.parse(JSON.stringify(account)):null;}catch(_){return null;}
   }
+  function usableProfile(profile){
+    return !!profile&&typeof profile==='object'&&!!(profile.name||profile.firstName||profile.surname||profile.birthDate||profile.photo&&profile.photo.dataUrl);
+  }
   function snapshotPayload(phone){
     var data=payload().data;
     var account=data.account||localAccountForPhone(phone);
     var digits=normalizePhone(phone||account&&account.phoneDigits);
-    if(account&&digits.length>=10)data.profile={phoneDigits:digits,displayName:account.profile&&account.profile.name||null};
+    var lastProfile=null;
+    try{if(typeof window.onayGetLastProfile==='function')lastProfile=window.onayGetLastProfile(digits);}catch(_){ }
+    if(account&&digits.length>=10){
+      if(!usableProfile(account.profile)&&lastProfile)account=Object.assign({},account,{profile:lastProfile});
+      data.profile={phoneDigits:digits,displayName:account.profile&&account.profile.name||null};
+    }
     data.account=account;
+    data.lastProfile=lastProfile||account&&account.profile||null;
     return data;
   }
   async function syncAccountSnapshot(){
@@ -161,7 +170,7 @@
     if(phone.length<10||!window.__onayDemoAccount)return false;
     try{
       var data=snapshotPayload(phone);
-      await request('/v1/account/snapshot',{phone:phone,deviceId:getDeviceId(),account:data.account,ledger:data.ledger,favorites:data.favorites});
+      await request('/v1/account/snapshot',{phone:phone,deviceId:getDeviceId(),account:data.account,lastProfile:data.lastProfile,ledger:data.ledger,favorites:data.favorites});
       return true;
     }catch(_){return false;}
   }
@@ -359,7 +368,7 @@
     try{
       var data=snapshotPayload(phone);
       var body={phone:phone,deviceId:getDeviceId()};
-      if(data.account){body.account=data.account;body.ledger=data.ledger;body.favorites=data.favorites;}
+      if(data.account){body.account=data.account;body.lastProfile=data.lastProfile;body.ledger=data.ledger;body.favorites=data.favorites;}
       var result=await request('/v1/account/register',body);
       if(result.owner===false){
         var ownerError=new Error('Бұл құрылғы осы нөмірдің негізгі телефоны емес.');
