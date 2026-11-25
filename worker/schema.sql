@@ -40,6 +40,7 @@ CREATE TABLE IF NOT EXISTS registered_phones (
 CREATE TABLE IF NOT EXISTS account_snapshots (
   phone_hash TEXT PRIMARY KEY,
   account_json TEXT NOT NULL CHECK (json_valid(account_json)),
+  profile_json TEXT NOT NULL CHECK (json_valid(profile_json)),
   ledger_json TEXT NOT NULL CHECK (json_valid(ledger_json)),
   favorites_json TEXT NOT NULL CHECK (json_valid(favorites_json)),
   created_at INTEGER NOT NULL,
