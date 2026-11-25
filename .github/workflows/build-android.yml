@@ -86,6 +86,7 @@ jobs:
           path.write_text(text.replace(marker, '<script src="device-pairing.js"></script>' + marker, 1), encoding='utf-8')
           PY
           cp image.png app/src/main/res/drawable-nodpi/ic_launcher.png
+          cp image.png app/src/main/res/drawable-nodpi/ic_launcher_foreground.png
 
       - name: Build signed release APK
         env:
