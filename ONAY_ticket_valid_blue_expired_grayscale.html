@@ -19005,13 +19005,15 @@ function findAlignmentPattern(matrix, alignmentPatternQuads, topRight, topLeft, 
       if(message)authSetError(message);
     };
     function signOutToAppPin(){closeMenuPage(false);closeRoutesPage();setCardsTab('my');authAfterLogoutPin=true;lockAppPin();}
-    function initAccountGate(withSplash=false){
+    function initAccountGate(){
       el('onay-app-root').classList.add('app-pin-locked');el('app-pin-gate').hidden=false;
-      if(withSplash){el('auth-content').innerHTML='<div class="auth-loading">ONAY! ашылуда…</div>';setTimeout(authShowStartupScreen,450);}
-      else authShowStartupScreen();
+      authShowStartupScreen();
     }
     document.addEventListener('visibilitychange',()=>{if(document.hidden)authStopCamera();else renderTrialTickets();});
-    initAccountGate(true);
+    // Native Android splash already handles startup branding. Render the
+    // account PIN gate immediately so the old in-page "ONAY! ашылуда…"
+    // loading screen never appears before the PIN page.
+    initAccountGate();
 
     // Экрандық пернетақтамен қатар компьютердің сан пернелері де жұмыс істейді.
     document.addEventListener('keydown',event=>{

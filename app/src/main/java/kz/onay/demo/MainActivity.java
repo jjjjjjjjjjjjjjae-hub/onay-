@@ -90,10 +90,16 @@ public class MainActivity extends FragmentActivity {
     private CameraManager cameraManager;
     private String torchCameraId;
     private int safeBottomInsetPx;
-    private static final long SPLASH_MIN_DURATION_MS = 1000L;
+    private static final long SPLASH_FIRST_STAGE_DURATION_MS = 650L;
+    private static final long SPLASH_MIN_DURATION_MS = 1300L;
     private View splashView;
+    private View splashFirstStage;
+    private View splashVersionStage;
+    private View splashVersionPatch;
+    private TextView splashVersionText;
     private long splashStartedAt;
     private boolean splashPageReady = false;
+    private boolean splashVersionStageReady = false;
     private boolean splashDismissScheduled = false;
     private boolean splashDismissed = false;
 
@@ -213,6 +219,8 @@ public class MainActivity extends FragmentActivity {
         splashStartedAt = SystemClock.uptimeMillis();
         setSplashSystemBars(true);
         root.addView(splashView, new FrameLayout.LayoutParams(-1, -1));
+        mainHandler.postDelayed(this::showSplashVersionStage,
+                SPLASH_FIRST_STAGE_DURATION_MS);
         mainHandler.postDelayed(() -> {
             // Do not leave the user on the splash if a WebView callback is
             // interrupted by a device-specific startup issue.
@@ -231,20 +239,43 @@ public class MainActivity extends FragmentActivity {
         splash.setBackgroundColor(Color.rgb(255, 214, 0));
         splash.setClickable(true);
 
-        ImageView referenceImage = new ImageView(this);
-        referenceImage.setImageResource(R.drawable.onay_splash_reference);
-        referenceImage.setScaleType(ImageView.ScaleType.CENTER_CROP);
-        splash.addView(referenceImage, new FrameLayout.LayoutParams(-1, -1));
+        ImageView firstReferenceImage = new ImageView(this);
+        firstReferenceImage.setImageResource(R.drawable.onay_splash_reference);
+        firstReferenceImage.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        splashFirstStage = firstReferenceImage;
+        splash.addView(firstReferenceImage, new FrameLayout.LayoutParams(-1, -1));
+
+        ImageView versionReferenceImage = new ImageView(this);
+        versionReferenceImage.setImageResource(R.drawable.onay_splash_version_reference);
+        versionReferenceImage.setScaleType(ImageView.ScaleType.CENTER_CROP);
+        versionReferenceImage.setAlpha(0f);
+        splashVersionStage = versionReferenceImage;
+        splash.addView(versionReferenceImage, new FrameLayout.LayoutParams(-1, -1));
+
+        FrameLayout.LayoutParams versionParams = new FrameLayout.LayoutParams(
+                dp(82), dp(30), Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
+        versionParams.bottomMargin = dp(42);
+
+        // The supplied second reference image contains its sample version.
+        // Cover that sample with the same yellow and place the real APK
+        // version on top so the screen stays visually identical after updates.
+        View versionPatch = new View(this);
+        versionPatch.setBackgroundColor(Color.rgb(255, 214, 0));
+        versionPatch.setAlpha(0f);
+        splashVersionPatch = versionPatch;
+        splash.addView(versionPatch, versionParams);
 
         TextView version = new TextView(this);
         version.setText("v " + getInstalledVersionName());
         version.setTextColor(Color.rgb(25, 25, 25));
         version.setTextSize(TypedValue.COMPLEX_UNIT_SP, 12);
         version.setGravity(Gravity.CENTER);
-        FrameLayout.LayoutParams versionParams = new FrameLayout.LayoutParams(
-                -2, -2, Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
-        versionParams.bottomMargin = dp(42);
-        splash.addView(version, versionParams);
+        version.setAlpha(0f);
+        splashVersionText = version;
+        FrameLayout.LayoutParams versionTextParams = new FrameLayout.LayoutParams(
+                dp(82), dp(30), Gravity.BOTTOM | Gravity.CENTER_HORIZONTAL);
+        versionTextParams.bottomMargin = dp(42);
+        splash.addView(version, versionTextParams);
         return splash;
     }
 
@@ -276,8 +307,24 @@ public class MainActivity extends FragmentActivity {
         getWindow().getDecorView().setSystemUiVisibility(flags);
     }
 
+    private void showSplashVersionStage() {
+        if (splashVersionStageReady || splashDismissed) return;
+        splashVersionStageReady = true;
+        if (splashVersionPatch != null) splashVersionPatch.setAlpha(1f);
+        if (splashVersionStage != null) {
+            splashVersionStage.animate().alpha(1f).setDuration(180L).start();
+        }
+        if (splashFirstStage != null) {
+            splashFirstStage.animate().alpha(0f).setDuration(180L).start();
+        }
+        if (splashVersionText != null) {
+            splashVersionText.animate().alpha(1f).setDuration(120L).start();
+        }
+        scheduleSplashDismissal();
+    }
+
     private void scheduleSplashDismissal() {
-        if (!splashPageReady || splashView == null || splashDismissed
+        if (!splashPageReady || !splashVersionStageReady || splashView == null || splashDismissed
                 || splashDismissScheduled) return;
         long remaining = splashStartedAt + SPLASH_MIN_DURATION_MS
                 - SystemClock.uptimeMillis();
