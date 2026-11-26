@@ -68,8 +68,8 @@ public class MainActivity extends FragmentActivity {
     // Releases below this version are blocked until the user installs the
     // current signed APK. This prevents old local-account behavior from
     // continuing after the account reset migration.
-    private static final long MINIMUM_SUPPORTED_VERSION_CODE = 87L;
-    private static final String MINIMUM_SUPPORTED_VERSION_NAME = "1.0.87";
+    private static final long MINIMUM_SUPPORTED_VERSION_CODE = 88L;
+    private static final String MINIMUM_SUPPORTED_VERSION_NAME = "1.0.88";
     private static final int CAMERA_PERMISSION_REQUEST = 702;
     private static final int FILE_CHOOSER_REQUEST = 703;
     private static final String APP_ASSET_HOST = "appassets.androidplatform.net";
