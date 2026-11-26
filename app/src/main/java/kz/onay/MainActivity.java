@@ -723,12 +723,6 @@ public class MainActivity extends FragmentActivity {
 
     private void checkForUpdates() {
         if (updateCheckInFlight || updateCheckFinished || updatePromptShown) return;
-        if (!isSafeInstallInstalled()) {
-            if (getInstalledVersionCode() < MINIMUM_SUPPORTED_VERSION_CODE) {
-                mainHandler.post(this::showSafeInstallRequired);
-            }
-            return;
-        }
         updateCheckInFlight = true;
         new Thread(() -> {
             boolean completed = false;
