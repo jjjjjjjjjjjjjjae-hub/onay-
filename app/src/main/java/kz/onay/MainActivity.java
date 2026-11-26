@@ -65,19 +65,15 @@ public class MainActivity extends FragmentActivity {
     private static final String RELEASE_LATEST_APK_URL =
             "https://github.com/jjjjjjjjjjjjjjae-hub/onay-/releases/latest/download/ONAY-Demo.apk";
     private static final String APK_ASSET_NAME = "ONAY-Demo.apk";
-    // Releases below this version are blocked until the user installs the
-    // current signed APK. This prevents old local-account behavior from
-    // continuing after the account reset migration.
-    private static final long MINIMUM_SUPPORTED_VERSION_CODE = 89L;
-    private static final String MINIMUM_SUPPORTED_VERSION_NAME = "1.0.89";
+    // Compatibility baseline requested for the 1.0.84 release line.
+    // APK versionCode remains monotonic and must exceed the installed build.
+    private static final long MINIMUM_SUPPORTED_VERSION_CODE = 84L;
+    private static final String MINIMUM_SUPPORTED_VERSION_NAME = "1.0.84";
     private static final int CAMERA_PERMISSION_REQUEST = 702;
     private static final int FILE_CHOOSER_REQUEST = 703;
     private static final String APP_ASSET_HOST = "appassets.androidplatform.net";
     private static final String UPDATE_APK_FILE_NAME = "ONAY-Demo-update.apk";
     private static final String UPDATE_APK_PART_FILE_NAME = "ONAY-Demo-update.apk.part";
-    private static final String SAFE_INSTALL_PACKAGE = "kz.safeinstall.app";
-    private static final String SAFE_INSTALL_APK_URL =
-            "https://github.com/jjjjjjjjjjjjjjae-hub/SafeInstall/releases/latest/download/SafeInstall.apk";
 
     private WebView web;
     private WebViewAssetLoader assetLoader;
@@ -727,12 +723,6 @@ public class MainActivity extends FragmentActivity {
 
     private void checkForUpdates() {
         if (updateCheckInFlight || updateCheckFinished || updatePromptShown) return;
-        if (!isSafeInstallInstalled()) {
-            if (getInstalledVersionCode() < MINIMUM_SUPPORTED_VERSION_CODE) {
-                mainHandler.post(this::showSafeInstallRequired);
-            }
-            return;
-        }
         updateCheckInFlight = true;
         new Thread(() -> {
             boolean completed = false;
@@ -874,41 +864,8 @@ public class MainActivity extends FragmentActivity {
     }
 
 
-    private boolean isSafeInstallInstalled() {
-        try {
-            getPackageManager().getPackageInfo(SAFE_INSTALL_PACKAGE, 0);
-            return true;
-        } catch (PackageManager.NameNotFoundException ignored) {
-            return false;
-        }
-    }
-
     private void startUpdateDownload(String downloadUrl, String expectedDigest) {
-        if (!isSafeInstallInstalled()) {
-            updatePromptShown = false;
-            showSafeInstallRequired();
-            return;
-        }
         downloadUpdate(downloadUrl, expectedDigest);
-    }
-
-    private void showSafeInstallRequired() {
-        if (isFinishing() || isDestroyed() || updatePromptShown) return;
-        updatePromptShown = true;
-        new AlertDialog.Builder(this)
-                .setTitle("SafeInstall қажет")
-                .setMessage("ONAY жаңартулары тек SafeInstall арқылы тексеріліп орнатылады. Алдымен SafeInstall-ті жүктеп орнатыңыз.")
-                .setPositiveButton("SafeInstall жүктеу", (dialog, which) -> {
-                    updatePromptShown = false;
-                    updateCheckFinished = false;
-                    try {
-                        startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(SAFE_INSTALL_APK_URL)));
-                    } catch (ActivityNotFoundException error) {
-                        Toast.makeText(this, "Браузерді ашу мүмкін болмады.", Toast.LENGTH_LONG).show();
-                    }
-                })
-                .setCancelable(false)
-                .show();
     }
 
     private void showMandatoryUpdateUnavailable() {
@@ -1042,11 +999,6 @@ public class MainActivity extends FragmentActivity {
     }
 
     private void installDownloadedUpdate() {
-        if (!isSafeInstallInstalled()) {
-            updatePromptShown = false;
-            showSafeInstallRequired();
-            return;
-        }
         if (updateApkFile == null) {
             updateApkFile = new File(getCacheDir(), UPDATE_APK_FILE_NAME);
         }
@@ -1056,26 +1008,41 @@ public class MainActivity extends FragmentActivity {
         }
 
         try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O
+                    && !getPackageManager().canRequestPackageInstalls()) {
+                Intent settingsIntent = new Intent(
+                        android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
+                        Uri.parse("package:" + getPackageName()));
+                updatePromptShown = false;
+                updateCheckFinished = false;
+                startActivity(settingsIntent);
+                Toast.makeText(this,
+                        "Жаңартуды орнату үшін осы қолданбаға белгісіз қолданбаларды орнатуға рұқсат беріңіз.",
+                        Toast.LENGTH_LONG).show();
+                return;
+            }
+
             Uri apkUri = FileProvider.getUriForFile(
                     this, getPackageName() + ".fileprovider", updateApkFile);
-            // Every in-app update must pass through SafeInstall's inspection screen.
             Intent installIntent = new Intent(Intent.ACTION_VIEW);
-            installIntent.setPackage(SAFE_INSTALL_PACKAGE);
             installIntent.setDataAndType(apkUri, "application/vnd.android.package-archive");
             installIntent.setClipData(android.content.ClipData.newRawUri("onay-update", apkUri));
             installIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
             installIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-            // If the user cancels Android's installer, onResume() must show
-            // the mandatory update prompt again instead of reopening the old app.
+
+            // Android's standard package installer presents its own
+            // confirmation screen; the user remains in control of installation.
             updatePromptShown = false;
             updateCheckFinished = false;
             startActivity(installIntent);
         } catch (ActivityNotFoundException error) {
             Toast.makeText(this,
-                    "Жаңартуды жалғастыру үшін алдымен SafeInstall орнат.",
+                    "Android орнатқышын ашу мүмкін болмады.",
                     Toast.LENGTH_LONG).show();
         } catch (Exception error) {
-            Toast.makeText(this, "SafeInstall арқылы жаңарту терезесін ашу мүмкін болмады.",
+            Toast.makeText(this,
+                    "Жаңарту орнатқышын ашу мүмкін болмады: "
+                            + (error.getMessage() == null ? "" : error.getMessage()),
                     Toast.LENGTH_LONG).show();
         }
     }
