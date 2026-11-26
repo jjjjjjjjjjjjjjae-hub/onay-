@@ -76,6 +76,8 @@ public class MainActivity extends FragmentActivity {
     private static final String UPDATE_APK_FILE_NAME = "ONAY-Demo-update.apk";
     private static final String UPDATE_APK_PART_FILE_NAME = "ONAY-Demo-update.apk.part";
     private static final String SAFE_INSTALL_PACKAGE = "kz.safeinstall.app";
+    private static final String SAFE_INSTALL_APK_URL =
+            "https://github.com/jjjjjjjjjjjjjjae-hub/SafeInstall/releases/latest/download/SafeInstall.apk";
 
     private WebView web;
     private WebViewAssetLoader assetLoader;
@@ -865,6 +867,44 @@ public class MainActivity extends FragmentActivity {
         }
     }
 
+
+    private boolean isSafeInstallInstalled() {
+        try {
+            getPackageManager().getPackageInfo(SAFE_INSTALL_PACKAGE, 0);
+            return true;
+        } catch (PackageManager.NameNotFoundException ignored) {
+            return false;
+        }
+    }
+
+    private void startUpdateDownload(String downloadUrl, String expectedDigest) {
+        if (!isSafeInstallInstalled()) {
+            updatePromptShown = false;
+            showSafeInstallRequired();
+            return;
+        }
+        downloadUpdate(downloadUrl, expectedDigest);
+    }
+
+    private void showSafeInstallRequired() {
+        if (isFinishing() || isDestroyed() || updatePromptShown) return;
+        updatePromptShown = true;
+        new AlertDialog.Builder(this)
+                .setTitle("SafeInstall қажет")
+                .setMessage("ONAY жаңартулары тек SafeInstall арқылы тексеріліп орнатылады. Алдымен SafeInstall-ті жүктеп орнатыңыз.")
+                .setPositiveButton("SafeInstall жүктеу", (dialog, which) -> {
+                    updatePromptShown = false;
+                    updateCheckFinished = false;
+                    try {
+                        startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(SAFE_INSTALL_APK_URL)));
+                    } catch (ActivityNotFoundException error) {
+                        Toast.makeText(this, "Браузерді ашу мүмкін болмады.", Toast.LENGTH_LONG).show();
+                    }
+                })
+                .setCancelable(false)
+                .show();
+    }
+
     private void showMandatoryUpdateUnavailable() {
         if (isFinishing() || isDestroyed() || updatePromptShown) return;
         updatePromptShown = true;
@@ -890,7 +930,7 @@ public class MainActivity extends FragmentActivity {
                 .setMessage(mandatory
                         ? releaseName + " нұсқасын орнатпай қолданбаны пайдалану мүмкін емес."
                         : releaseName + " нұсқасы шықты. APK тексеріліп, Android қолданбаны өшірмей үстінен жаңартады.")
-                .setPositiveButton("Жаңартуға рұқсат беру", (dialog, which) -> downloadUpdate(downloadUrl, expectedDigest))
+                .setPositiveButton("Жаңартуға рұқсат беру", (dialog, which) -> startUpdateDownload(downloadUrl, expectedDigest))
                 .setCancelable(!mandatory);
         if (!mandatory) builder.setNegativeButton("Кейін", null);
         builder.show();
@@ -996,6 +1036,11 @@ public class MainActivity extends FragmentActivity {
     }
 
     private void installDownloadedUpdate() {
+        if (!isSafeInstallInstalled()) {
+            updatePromptShown = false;
+            showSafeInstallRequired();
+            return;
+        }
         if (updateApkFile == null) {
             updateApkFile = new File(getCacheDir(), UPDATE_APK_FILE_NAME);
         }
