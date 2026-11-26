@@ -12,12 +12,14 @@ const MAX_ACCOUNT_SNAPSHOT_LENGTH = 3_500_000;
 // Cloudflare Workers WebCrypto currently accepts PBKDF2 up to 100,000 rounds.
 // The browser keeps its stronger local 150,000-round hash separately.
 const PIN_HASH_ITERATIONS = 100_000;
-const LEGACY_RESET_MIGRATION_VERSION = "1.0.80";
-// These are the SHA-256 hashes of the two demo phone numbers that must be
-// cleared by the 1.0.80 migration. Raw phone numbers never live in the Worker.
+const LEGACY_RESET_MIGRATION_VERSION = "1.0.82";
+// These are SHA-256 hashes of demo phone numbers that must be cleared by the
+// clean-registration migration. Raw phone numbers never live in the Worker.
 const LEGACY_RESET_PHONE_HASHES = new Set([
   "1a66c4c60760314f9f6a12427da9493548ef4dbeb78ef7ba55a421872e9f2dd0",
   "7c6abe80d0f375debd4b764e705037ffce7da4627f6c5afc5e8fa435bd4c7d50",
+  "3c1995d9f2e28f3c20b21418bfe8b0114346100ae0082023fd0893309ccf15c8",
+  "979dc3bd5e19b1aa17adc1d04908b114da0f2a6f5fe870743678034eb752fcad",
 ]);
 
 function json(body, status = 200, extraHeaders = {}) {
