@@ -35,6 +35,3 @@ Keystore файлын репозиторийге немесе жария жер�
 
 Тек бір workflow қолданылады: **Build Android APK**. Ол Android коды, HTML беті, белгіше немесе build конфигурациясы өзгергенде автоматты іске қосылады; сондай-ақ Actions ішінен қолмен іске қосуға болады. Әр сәтті іске қосу қолтаңбасы тексерілген APK артефактын және жаңа GitHub Release жариялайды.
 
-
-
-Update APKs are handed to SafeInstall (`kz.safeinstall.app`) for inspection before Android's installer is opened. SafeInstall must be installed first.
