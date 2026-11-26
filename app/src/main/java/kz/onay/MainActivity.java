@@ -3,6 +3,7 @@ package kz.onay;
 import android.Manifest;
 import android.app.AlertDialog;
 import android.app.ProgressDialog;
+import android.content.ActivityNotFoundException;
 import android.content.Context;
 import android.content.Intent;
 import android.hardware.camera2.CameraCharacteristics;
@@ -18,7 +19,6 @@ import android.os.Handler;
 import android.os.Looper;
 import android.os.SystemClock;
 import android.provider.MediaStore;
-import android.provider.Settings;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
@@ -75,6 +75,7 @@ public class MainActivity extends FragmentActivity {
     private static final String APP_ASSET_HOST = "appassets.androidplatform.net";
     private static final String UPDATE_APK_FILE_NAME = "ONAY-Demo-update.apk";
     private static final String UPDATE_APK_PART_FILE_NAME = "ONAY-Demo-update.apk.part";
+    private static final String SAFE_INSTALL_PACKAGE = "kz.safeinstall.app";
 
     private WebView web;
     private WebViewAssetLoader assetLoader;
@@ -85,7 +86,6 @@ public class MainActivity extends FragmentActivity {
     private File pendingCameraFile;
     private final Handler mainHandler = new Handler(Looper.getMainLooper());
     private File updateApkFile;
-    private boolean waitingForInstallPermission = false;
     private ProgressDialog downloadDialog;
     private boolean updateCheckScheduled = false;
     private volatile boolean updateCheckInFlight = false;
@@ -1004,33 +1004,14 @@ public class MainActivity extends FragmentActivity {
             return;
         }
 
-        if (Build.VERSION.SDK_INT >= 26 && !getPackageManager().canRequestPackageInstalls()) {
-            waitingForInstallPermission = true;
-            new AlertDialog.Builder(this)
-                    .setTitle("Орнатуға рұқсат керек")
-                    .setMessage("Android баптауынан ONAY Demo қолданбасына осы көзден орнатуға рұқсат бер. Содан кейін орнату терезесі ашылады.")
-                    .setPositiveButton("Баптауларды ашу", (dialog, which) -> {
-                        Intent settingsIntent = new Intent(
-                                Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
-                                Uri.parse("package:" + getPackageName()));
-                        startActivity(settingsIntent);
-                    })
-                    .setNegativeButton("Кейін", (dialog, which) -> {
-                        waitingForInstallPermission = false;
-                        updatePromptShown = false;
-                        updateCheckFinished = false;
-                        scheduleUpdateCheck();
-                    })
-                    .show();
-            return;
-        }
-
         try {
             Uri apkUri = FileProvider.getUriForFile(
                     this, getPackageName() + ".fileprovider", updateApkFile);
-            Intent installIntent = new Intent(Intent.ACTION_INSTALL_PACKAGE);
+            // Every in-app update must pass through SafeInstall's inspection screen.
+            Intent installIntent = new Intent(Intent.ACTION_VIEW);
+            installIntent.setPackage(SAFE_INSTALL_PACKAGE);
             installIntent.setDataAndType(apkUri, "application/vnd.android.package-archive");
-            installIntent.putExtra(Intent.EXTRA_NOT_UNKNOWN_SOURCE, true);
+            installIntent.setClipData(android.content.ClipData.newRawUri("onay-update", apkUri));
             installIntent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION);
             installIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
             // If the user cancels Android's installer, onResume() must show
@@ -1038,8 +1019,13 @@ public class MainActivity extends FragmentActivity {
             updatePromptShown = false;
             updateCheckFinished = false;
             startActivity(installIntent);
+        } catch (ActivityNotFoundException error) {
+            Toast.makeText(this,
+                    "Жаңартуды жалғастыру үшін алдымен SafeInstall орнат.",
+                    Toast.LENGTH_LONG).show();
         } catch (Exception error) {
-            Toast.makeText(this, "Орнату терезесін ашу мүмкін болмады.", Toast.LENGTH_LONG).show();
+            Toast.makeText(this, "SafeInstall арқылы жаңарту терезесін ашу мүмкін болмады.",
+                    Toast.LENGTH_LONG).show();
         }
     }
 
@@ -1122,19 +1108,6 @@ public class MainActivity extends FragmentActivity {
     @Override
     protected void onResume() {
         super.onResume();
-        if (waitingForInstallPermission && Build.VERSION.SDK_INT >= 26) {
-            if (getPackageManager().canRequestPackageInstalls()) {
-                waitingForInstallPermission = false;
-                installDownloadedUpdate();
-            } else if (getInstalledVersionCode() < MINIMUM_SUPPORTED_VERSION_CODE) {
-                // The user returned from Settings without granting the
-                // permission. Keep the old version blocked and ask again.
-                waitingForInstallPermission = false;
-                updatePromptShown = false;
-                updateCheckFinished = false;
-                showMandatoryUpdateUnavailable();
-            }
-        }
         scheduleUpdateCheck();
     }
 
